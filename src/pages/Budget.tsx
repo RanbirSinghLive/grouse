@@ -108,7 +108,7 @@ export const Budget = () => {
                     ${monthlyAmount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   {owners.length > 0 && (
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{cashflow.owner || '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{cashflow.owner || 'All / Household'}</td>
                   )}
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     <div className="flex gap-3">

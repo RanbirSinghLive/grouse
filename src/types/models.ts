@@ -28,6 +28,9 @@ export type Account = {
   owner?: string; // Owner of the account (e.g., "Person 1", "Person 2", "Joint", "Household")
   useHoldings?: boolean; // If true, calculate balance from holdings; if false, use manual balance
   holdings?: Holding[]; // Holdings for investment accounts
+  // Mortgage-specific fields for projections
+  monthlyPayment?: number; // Monthly payment amount
+  termRemainingMonths?: number; // Remaining term in months
   updatedAt: string;
 };
 
@@ -55,5 +58,10 @@ export type AppData = {
 // Helper to check if account type supports holdings
 export const isInvestmentAccount = (accountType: Account['type']): boolean => {
   return ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(accountType);
+};
+
+// Helper to check if account is a mortgage
+export const isMortgage = (accountType: Account['type']): boolean => {
+  return accountType === 'mortgage';
 };
 

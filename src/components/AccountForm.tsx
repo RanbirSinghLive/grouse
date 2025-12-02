@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { isInvestmentAccount } from '../types/models';
+import { formatAccountType } from '../utils/calculations';
 import { HoldingsList } from './HoldingsList';
 import type { Account } from '../types/models';
 
@@ -42,6 +43,8 @@ export const AccountForm = () => {
     interestRate: 0,
     owner: '',
     useHoldings: false,
+    monthlyPayment: 0,
+    termRemainingMonths: 0,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -58,6 +61,8 @@ export const AccountForm = () => {
         interestRate: editingAccount.interestRate || 0,
         owner: editingAccount.owner || '',
         useHoldings: editingAccount.useHoldings || false,
+        monthlyPayment: editingAccount.monthlyPayment || 0,
+        termRemainingMonths: editingAccount.termRemainingMonths || 0,
       });
       setErrors({});
     } else {
@@ -71,6 +76,8 @@ export const AccountForm = () => {
         interestRate: 0,
         owner: '',
         useHoldings: false,
+        monthlyPayment: 0,
+        termRemainingMonths: 0,
       });
       setErrors({});
     }
@@ -89,6 +96,16 @@ export const AccountForm = () => {
 
     if (formData.interestRate < 0) {
       newErrors.interestRate = 'Interest rate must be >= 0';
+    }
+
+    // Mortgage-specific validation
+    if (formData.type === 'mortgage') {
+      if (formData.monthlyPayment < 0) {
+        newErrors.monthlyPayment = 'Monthly payment must be >= 0';
+      }
+      if (formData.termRemainingMonths < 0) {
+        newErrors.termRemainingMonths = 'Term remaining must be >= 0';
+      }
     }
 
     setErrors(newErrors);
@@ -114,6 +131,8 @@ export const AccountForm = () => {
       interestRate: formData.interestRate > 0 ? formData.interestRate : undefined,
       owner: formData.owner || undefined,
       useHoldings: isInvestmentAccount(formData.type) ? formData.useHoldings : false,
+      monthlyPayment: formData.type === 'mortgage' && formData.monthlyPayment > 0 ? formData.monthlyPayment : undefined,
+      termRemainingMonths: formData.type === 'mortgage' && formData.termRemainingMonths > 0 ? formData.termRemainingMonths : undefined,
     };
 
     if (editingAccountId) {
@@ -132,6 +151,8 @@ export const AccountForm = () => {
       interestRate: 0,
       owner: '',
       useHoldings: false,
+      monthlyPayment: 0,
+      termRemainingMonths: 0,
     });
     setEditingAccount(null);
   };
@@ -147,6 +168,8 @@ export const AccountForm = () => {
       interestRate: 0,
       owner: '',
       useHoldings: false,
+      monthlyPayment: 0,
+      termRemainingMonths: 0,
     });
     setEditingAccount(null);
   };
@@ -196,7 +219,7 @@ export const AccountForm = () => {
             >
               {accountTypes.map((type) => (
                 <option key={type} value={type}>
-                  {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  {formatAccountType(type)}
                 </option>
               ))}
             </select>
@@ -313,6 +336,62 @@ export const AccountForm = () => {
           />
           {errors.interestRate && <p className="text-red-500 text-sm mt-1">{errors.interestRate}</p>}
         </div>
+
+        {/* Mortgage-specific fields */}
+        {formData.type === 'mortgage' && (
+          <div className="bg-blue-50 p-4 rounded-lg border-2 border-blue-200">
+            <h3 className="text-sm font-semibold text-blue-900 mb-4">Mortgage Details (for projections)</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Monthly Payment ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.monthlyPayment === 0 ? '' : formData.monthlyPayment} // Show empty for 0
+                  onChange={(e) => setFormData({ ...formData, monthlyPayment: Number(e.target.value) })}
+                  onBlur={() => {
+                    if (formData.monthlyPayment < 0) {
+                      setErrors({ ...errors, monthlyPayment: 'Monthly payment must be >= 0' });
+                    }
+                  }}
+                  className={`w-full px-4 py-2.5 border rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    errors.monthlyPayment ? 'border-red-300 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400'
+                  }`}
+                  placeholder="0.00"
+                />
+                {errors.monthlyPayment && <p className="text-red-500 text-sm mt-1">{errors.monthlyPayment}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Term Remaining (months)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={formData.termRemainingMonths === 0 ? '' : formData.termRemainingMonths} // Show empty for 0
+                  onChange={(e) => setFormData({ ...formData, termRemainingMonths: Number(e.target.value) })}
+                  onBlur={() => {
+                    if (formData.termRemainingMonths < 0) {
+                      setErrors({ ...errors, termRemainingMonths: 'Term remaining must be >= 0' });
+                    }
+                  }}
+                  className={`w-full px-4 py-2.5 border rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    errors.termRemainingMonths ? 'border-red-300 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400'
+                  }`}
+                  placeholder="0"
+                />
+                {errors.termRemainingMonths && <p className="text-red-500 text-sm mt-1">{errors.termRemainingMonths}</p>}
+                {formData.termRemainingMonths > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    ≈ {Math.round(formData.termRemainingMonths / 12 * 10) / 10} years
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex gap-2">
           <button
