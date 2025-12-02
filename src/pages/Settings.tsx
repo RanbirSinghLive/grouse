@@ -1,12 +1,63 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { exportData, importData, clearData } from '../utils/storage';
 
 export const Settings = () => {
-  const { household, setHousehold, reset } = useHouseholdStore();
+  const { household, setHousehold, reset, cashflows, transactions, patterns, renameCategory } = useHouseholdStore();
   const [householdName, setHouseholdName] = useState(household?.name || '');
   const [newOwner, setNewOwner] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [categoryEditValue, setCategoryEditValue] = useState<string>('');
+
+  // Get all unique categories from transactions, patterns, and cashflows
+  const allCategories = useMemo(() => {
+    const categories = new Set<string>();
+    cashflows.forEach(cf => {
+      if (cf.category) categories.add(cf.category);
+    });
+    transactions.forEach(tx => {
+      if (tx.category) categories.add(tx.category);
+    });
+    patterns.forEach(p => {
+      if (p.category) categories.add(p.category);
+    });
+    return Array.from(categories).sort();
+  }, [cashflows, transactions, patterns]);
+
+  // Update household name when household changes
+  useEffect(() => {
+    setHouseholdName(household?.name || '');
+  }, [household]);
+
+  const handleStartEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setCategoryEditValue(category);
+  };
+
+  const handleSaveCategory = (oldName: string) => {
+    const newName = categoryEditValue.trim();
+    if (!newName || newName === oldName) {
+      setEditingCategory(null);
+      return;
+    }
+    
+    // Check if new name already exists
+    if (allCategories.includes(newName)) {
+      alert(`Category "${newName}" already exists!`);
+      return;
+    }
+
+    console.log('[Settings] Renaming category:', oldName, '->', newName);
+    renameCategory(oldName, newName);
+    setEditingCategory(null);
+    setCategoryEditValue('');
+  };
+
+  const handleCancelEditCategory = () => {
+    setEditingCategory(null);
+    setCategoryEditValue('');
+  };
 
   const handleSaveHousehold = () => {
     if (!household) return;
@@ -114,6 +165,86 @@ export const Settings = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Category Management */}
+      <div className="bg-gradient-to-br from-white to-orange-50 p-8 rounded-2xl shadow-lg border-2 border-orange-200 mb-6">
+        <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+          <span className="text-2xl">🏷️</span>
+          Category Management
+        </h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Edit category names. Changes will be applied to all transactions, patterns, and cashflows using that category.
+        </p>
+        {allCategories.length === 0 ? (
+          <p className="text-gray-500 italic">No categories found. Categories will appear here once you start tagging transactions or creating cashflows.</p>
+        ) : (
+          <div className="space-y-2">
+            {allCategories.map((category) => {
+              const isEditing = editingCategory === category;
+              // Count usage
+              const transactionCount = transactions.filter(tx => tx.category === category).length;
+              const patternCount = patterns.filter(p => p.category === category).length;
+              const cashflowCount = cashflows.filter(cf => cf.category === category).length;
+              const totalCount = transactionCount + patternCount + cashflowCount;
+
+              return (
+                <div
+                  key={category}
+                  className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 hover:border-orange-300 transition-colors"
+                >
+                  {isEditing ? (
+                    <>
+                      <input
+                        type="text"
+                        value={categoryEditValue}
+                        onChange={(e) => setCategoryEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveCategory(category);
+                          } else if (e.key === 'Escape') {
+                            handleCancelEditCategory();
+                          }
+                        }}
+                        className="flex-1 px-3 py-2 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        autoFocus
+                      />
+                      <div className="flex gap-2 ml-2">
+                        <button
+                          onClick={() => handleSaveCategory(category)}
+                          className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm font-semibold hover:bg-green-600 transition-colors"
+                        >
+                          ✓ Save
+                        </button>
+                        <button
+                          onClick={handleCancelEditCategory}
+                          className="px-3 py-1.5 bg-gray-500 text-white rounded-lg text-sm font-semibold hover:bg-gray-600 transition-colors"
+                        >
+                          ✕ Cancel
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex-1">
+                        <span className="font-medium text-gray-900">{category}</span>
+                        <span className="text-xs text-gray-500 ml-2">
+                          ({totalCount} {totalCount === 1 ? 'entry' : 'entries'}: {transactionCount} transaction{transactionCount !== 1 ? 's' : ''}, {patternCount} pattern{patternCount !== 1 ? 's' : ''}, {cashflowCount} cashflow{cashflowCount !== 1 ? 's' : ''})
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleStartEditCategory(category)}
+                        className="px-4 py-1.5 bg-orange-500 text-white rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors"
+                      >
+                        ✏️ Edit
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Owners Management */}

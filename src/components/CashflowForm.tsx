@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import type { Cashflow } from '../types/models';
 
@@ -26,6 +26,14 @@ export const CashflowForm = () => {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [categorySuggestions, setCategorySuggestions] = useState<string[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(-1);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const categoryInputRef = useRef<HTMLInputElement | null>(null);
+  const formRef = useRef<HTMLDivElement | null>(null);
+
+  // Get all unique categories from existing cashflows
+  const allCategories = [...new Set(cashflows.map(cf => cf.category).filter(Boolean))].sort();
 
   useEffect(() => {
     if (editingCashflow) {
@@ -39,6 +47,13 @@ export const CashflowForm = () => {
         owner: editingCashflow.owner || '',
       });
       setErrors({});
+      
+      // Scroll form into view when editing
+      if (formRef.current) {
+        setTimeout(() => {
+          formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }
     } else {
       console.log('[CashflowForm] Resetting form for new cashflow');
       setFormData({
@@ -51,7 +66,7 @@ export const CashflowForm = () => {
       });
       setErrors({});
     }
-  }, [editingCashflow]);
+  }, [editingCashflow, editingCashflowId]);
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -123,7 +138,7 @@ export const CashflowForm = () => {
   };
 
   return (
-    <div className="bg-gradient-to-br from-white to-emerald-50 p-8 rounded-2xl shadow-lg border-2 border-emerald-200 mb-6">
+    <div ref={formRef} className="bg-gradient-to-br from-white to-emerald-50 p-8 rounded-2xl shadow-lg border-2 border-emerald-200 mb-6">
       <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
         <span className="text-3xl">{editingCashflowId ? '✏️' : '➕'}</span>
         {editingCashflowId ? 'Edit Cashflow' : 'Add Cashflow'}
@@ -162,19 +177,111 @@ export const CashflowForm = () => {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Category *
             </label>
             <input
+              ref={categoryInputRef}
               type="text"
               value={formData.category}
-              onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFormData({ ...formData, category: value });
+                setSelectedSuggestionIndex(-1);
+                
+                // Filter suggestions
+                if (value.trim()) {
+                  const filtered = allCategories.filter(cat =>
+                    cat.toLowerCase().includes(value.toLowerCase())
+                  );
+                  setCategorySuggestions(filtered.slice(0, 5));
+                  setShowSuggestions(filtered.length > 0);
+                } else {
+                  setCategorySuggestions([]);
+                  setShowSuggestions(false);
+                }
+              }}
+              onFocus={() => {
+                if (formData.category.trim()) {
+                  const filtered = allCategories.filter(cat =>
+                    cat.toLowerCase().includes(formData.category.toLowerCase())
+                  );
+                  setCategorySuggestions(filtered.slice(0, 5));
+                  setShowSuggestions(filtered.length > 0);
+                }
+              }}
+              onBlur={() => {
+                // Delay to allow click on suggestion
+                setTimeout(() => {
+                  setShowSuggestions(false);
+                  setSelectedSuggestionIndex(-1);
+                }, 200);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (categorySuggestions.length > 0) {
+                    const nextIndex = selectedSuggestionIndex < categorySuggestions.length - 1 
+                      ? selectedSuggestionIndex + 1 
+                      : 0;
+                    setSelectedSuggestionIndex(nextIndex);
+                    setFormData({ ...formData, category: categorySuggestions[nextIndex] });
+                  }
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  if (categorySuggestions.length > 0) {
+                    const prevIndex = selectedSuggestionIndex > 0 
+                      ? selectedSuggestionIndex - 1 
+                      : categorySuggestions.length - 1;
+                    setSelectedSuggestionIndex(prevIndex);
+                    setFormData({ ...formData, category: categorySuggestions[prevIndex] });
+                  }
+                } else if (e.key === 'Enter' && selectedSuggestionIndex >= 0 && selectedSuggestionIndex < categorySuggestions.length) {
+                  e.preventDefault();
+                  setFormData({ ...formData, category: categorySuggestions[selectedSuggestionIndex] });
+                  setShowSuggestions(false);
+                  setSelectedSuggestionIndex(-1);
+                } else if (e.key === 'Escape') {
+                  setShowSuggestions(false);
+                  setSelectedSuggestionIndex(-1);
+                } else {
+                  setSelectedSuggestionIndex(-1);
+                }
+              }}
               className={`w-full px-4 py-2.5 border rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                 errors.category ? 'border-red-300 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400'
               }`}
               placeholder="e.g., Salary, Housing"
             />
+            {/* Autocomplete suggestions */}
+            {showSuggestions && categorySuggestions.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                {categorySuggestions.map((suggestion, index) => {
+                  const isSelected = selectedSuggestionIndex === index;
+                  return (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setFormData({ ...formData, category: suggestion });
+                        setShowSuggestions(false);
+                        setSelectedSuggestionIndex(-1);
+                      }}
+                      onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                      className={`w-full text-left px-4 py-2.5 text-sm focus:outline-none ${
+                        isSelected
+                          ? 'bg-blue-500 text-white'
+                          : 'hover:bg-blue-50 text-gray-900'
+                      }`}
+                    >
+                      {suggestion}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             {errors.category && <p className="text-red-500 text-sm mt-1">{errors.category}</p>}
           </div>
 

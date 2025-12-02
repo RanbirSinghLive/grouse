@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { Household, Account, Cashflow, AppData, Holding } from '../types/models';
-import { loadData, saveData } from '../utils/storage';
+import type { Household, Account, Cashflow, AppData, Holding, Transaction, TransactionPattern, ImportData } from '../types/models';
+import { loadData, saveData, loadImportData, saveImportData } from '../utils/storage';
 import { fetchPrices } from '../utils/stockApi';
 
 interface HouseholdStore {
@@ -10,6 +10,9 @@ interface HouseholdStore {
   cashflows: Cashflow[];
   editingAccountId: string | null;
   editingCashflowId: string | null;
+  // Import state
+  transactions: Transaction[];
+  patterns: TransactionPattern[];
 
   // Actions
   initialize: () => void;
@@ -28,6 +31,15 @@ interface HouseholdStore {
   deleteHolding: (accountId: string, holdingId: string) => void;
   recalculateAccountBalance: (accountId: string) => void;
   refreshHoldingPrices: (accountId: string, onProgress?: (current: number, total: number, ticker: string) => void) => Promise<void>;
+  // Import actions
+  addTransactions: (transactions: Transaction[]) => void;
+  updateTransaction: (id: string, updates: Partial<Transaction>) => void;
+  deleteTransaction: (id: string) => void;
+  addPattern: (pattern: TransactionPattern) => void;
+  updatePattern: (id: string, updates: Partial<TransactionPattern>) => void;
+  deletePattern: (id: string) => void;
+  persistImportData: () => void;
+  renameCategory: (oldName: string, newName: string) => void;
   reset: () => void;
 }
 
@@ -48,10 +60,24 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     console.log('[store] persist: data saved to storage');
   };
 
+  // Persist import data
+  const persistImportData = () => {
+    const state = get();
+    const importData: ImportData = {
+      transactions: state.transactions,
+      patterns: state.patterns,
+      importHistory: [], // TODO: Implement import history
+    };
+    saveImportData(importData);
+    console.log('[store] persistImportData: import data saved to storage');
+  };
+
   // Initialize from localStorage
   const initialize = () => {
     console.log('[store] initialize: loading data from storage');
     const data = loadData();
+    const importData = loadImportData();
+    
     if (data) {
       set({
         household: data.household,
@@ -59,6 +85,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         cashflows: data.cashflows || [],
         editingAccountId: null,
         editingCashflowId: null,
+        transactions: importData?.transactions || [],
+        patterns: importData?.patterns || [],
       });
       console.log('[store] initialize: data loaded', data);
     } else {
@@ -73,6 +101,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         cashflows: [],
         editingAccountId: null,
         editingCashflowId: null,
+        transactions: importData?.transactions || [],
+        patterns: importData?.patterns || [],
       });
       console.log('[store] initialize: created default household');
       persist();
@@ -86,6 +116,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     cashflows: [],
     editingAccountId: null,
     editingCashflowId: null,
+    transactions: [],
+    patterns: [],
 
     // Initialize
     initialize,
@@ -346,6 +378,92 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       }
     },
 
+    // Import actions
+    addTransactions: (transactions) => {
+      console.log('[store] addTransactions:', transactions.length);
+      set((state) => ({
+        transactions: [...state.transactions, ...transactions],
+      }));
+      get().persistImportData();
+    },
+
+    updateTransaction: (id, updates) => {
+      console.log('[store] updateTransaction:', id, updates);
+      set((state) => ({
+        transactions: state.transactions.map((tx) =>
+          tx.id === id ? { ...tx, ...updates } : tx
+        ),
+      }));
+      get().persistImportData();
+    },
+
+    deleteTransaction: (id) => {
+      console.log('[store] deleteTransaction:', id);
+      set((state) => ({
+        transactions: state.transactions.filter((tx) => tx.id !== id),
+      }));
+      get().persistImportData();
+    },
+
+    addPattern: (pattern) => {
+      console.log('[store] addPattern:', pattern);
+      set((state) => ({
+        patterns: [...state.patterns, pattern],
+      }));
+      get().persistImportData();
+    },
+
+    updatePattern: (id, updates) => {
+      console.log('[store] updatePattern:', id, updates);
+      set((state) => ({
+        patterns: state.patterns.map((p) =>
+          p.id === id ? { ...p, ...updates } : p
+        ),
+      }));
+      get().persistImportData();
+    },
+
+    deletePattern: (id) => {
+      console.log('[store] deletePattern:', id);
+      set((state) => ({
+        patterns: state.patterns.filter((p) => p.id !== id),
+      }));
+      get().persistImportData();
+    },
+
+    persistImportData,
+
+    // Rename category across all transactions, patterns, and cashflows
+    renameCategory: (oldName, newName) => {
+      console.log('[store] renameCategory:', oldName, '->', newName);
+      const state = get();
+      
+      // Update transactions
+      const updatedTransactions = state.transactions.map(tx =>
+        tx.category === oldName ? { ...tx, category: newName } : tx
+      );
+      
+      // Update patterns
+      const updatedPatterns = state.patterns.map(p =>
+        p.category === oldName ? { ...p, category: newName } : p
+      );
+      
+      // Update cashflows
+      const updatedCashflows = state.cashflows.map(cf =>
+        cf.category === oldName ? { ...cf, category: newName } : cf
+      );
+      
+      set({
+        transactions: updatedTransactions,
+        patterns: updatedPatterns,
+        cashflows: updatedCashflows,
+      });
+      
+      // Persist both app data and import data
+      persist();
+      persistImportData();
+    },
+
     // Reset
     reset: () => {
       console.log('[store] reset: clearing all data');
@@ -359,8 +477,11 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         cashflows: [],
         editingAccountId: null,
         editingCashflowId: null,
+        transactions: [],
+        patterns: [],
       });
       persist();
+      persistImportData();
     },
   };
 });

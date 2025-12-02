@@ -1,6 +1,7 @@
-import type { AppData } from '../types/models';
+import type { AppData, ImportData } from '../types/models';
 
 const STORAGE_KEY = 'grouse-app-data';
+const IMPORT_STORAGE_KEY = 'grouse-import-data';
 
 export const saveData = (data: AppData): void => {
   console.log('[storage] saveData: saving data to localStorage');
@@ -56,10 +57,40 @@ export const clearData = (): void => {
   console.log('[storage] clearData: clearing all data from localStorage');
   try {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(IMPORT_STORAGE_KEY);
     console.log('[storage] clearData: data cleared successfully');
   } catch (error) {
     console.error('[storage] clearData: error clearing data', error);
     throw new Error('Failed to clear data from localStorage');
+  }
+};
+
+// Import data storage functions
+export const saveImportData = (data: ImportData): void => {
+  console.log('[storage] saveImportData: saving import data to localStorage');
+  try {
+    localStorage.setItem(IMPORT_STORAGE_KEY, JSON.stringify(data));
+    console.log('[storage] saveImportData: import data saved successfully');
+  } catch (error) {
+    console.error('[storage] saveImportData: error saving import data', error);
+    throw new Error('Failed to save import data to localStorage');
+  }
+};
+
+export const loadImportData = (): ImportData | null => {
+  console.log('[storage] loadImportData: loading import data from localStorage');
+  try {
+    const stored = localStorage.getItem(IMPORT_STORAGE_KEY);
+    if (!stored) {
+      console.log('[storage] loadImportData: no import data found in localStorage');
+      return null;
+    }
+    const data = JSON.parse(stored) as ImportData;
+    console.log('[storage] loadImportData: import data loaded successfully', data);
+    return data;
+  } catch (error) {
+    console.error('[storage] loadImportData: error loading import data', error);
+    return null;
   }
 };
 
