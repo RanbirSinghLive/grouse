@@ -507,3 +507,99 @@ For Asset Mix Breakdown chart, group accounts into 5 categories:
 - Filter buttons on Accounts and Budget pages to view by owner
 - Empty owner displays as "All / Household" in UI
 - Supports multi-person households (e.g., couples) with roll-up capabilities
+
+### CSV Import Implementation
+- **Parser:** Handles multiple bank formats with auto-detection
+- **Header Detection:** Checks if first column is a date to distinguish headers from data
+- **Column Mapping:** Auto-detects column structure for headerless CSVs (4-column vs 5-column patterns)
+- **Date Parsing:** Supports YYYY-MM-DD, MM/DD/YYYY, and other common formats
+- **Amount Parsing:** Handles both single amount column and separate debit/credit columns
+- **Transaction Accumulation:** Combines transactions from multiple files, avoiding duplicates
+- **Error Handling:** Continues processing remaining files if one fails, shows error summary
+- **Multi-file Support:** Processes multiple CSV files in sequence with progress tracking
+
+### Pattern Matching Algorithm
+- **Description-Weighted:** Prioritizes transaction description keywords over amount
+- **Keyword Extraction:** Removes common words, numbers, and special characters
+- **Confidence Scoring:** Starts at 50%, increases with successful matches, decreases with failures
+- **Amount Tolerance:** Patterns created with 50%-200% amount range for flexibility
+- **Type Matching:** Matches against transaction `isDebit` flag (derived from debit/credit columns)
+- **Pattern Updates:** Confidence adjusts based on user feedback (accept/reject suggestions)
+- **Auto-fill:** High-confidence matches (≥70%) automatically suggest categories
+
+---
+
+## 14. 🚀 Recommended Next Steps
+
+### Immediate Priorities (v0.1 Completion)
+1. **Testing & Bug Fixes**
+   - Test CSV import with various bank formats
+   - Verify duplicate detection accuracy
+   - Test pattern learning with real transaction data
+   - Validate month-by-month budgeting calculations
+
+2. **UX Polish**
+   - Improve error messages for failed CSV parsing
+   - Add loading states for large CSV imports
+   - Enhance transaction review table with sorting
+   - Add export functionality for categorized transactions
+
+3. **Performance Optimization**
+   - Optimize pattern matching for large transaction sets
+   - Implement pagination or virtualization for large transaction lists
+   - Cache pattern matches to avoid re-computation
+
+### Short-term Enhancements (v0.2)
+1. **Transaction Rules Engine**
+   - User-defined rules for automatic categorization (e.g., "If description contains 'AMAZON', category = 'Shopping'")
+   - Rule priority and conflict resolution
+   - Rule testing interface
+
+2. **Budget Analysis**
+   - Compare actual spending vs budgeted amounts by category
+   - Spending trends over time (month-over-month comparisons)
+   - Budget variance alerts
+
+3. **Recurring Transaction Detection**
+   - Automatically identify recurring transactions
+   - Suggest converting to cashflows
+   - One-click conversion from transaction to recurring cashflow
+
+4. **Enhanced Filtering & Search**
+   - Full-text search across transactions
+   - Date range filtering
+   - Amount range filtering
+   - Multi-category filtering
+
+### Medium-term Features (v0.3+)
+1. **Forecast Engine Integration**
+   - Use actual transaction history to inform projections
+   - Seasonal spending patterns
+   - Income variability modeling
+
+2. **Reporting & Analytics**
+   - Spending reports by category, owner, time period
+   - Income vs expense trends
+   - Category spending breakdowns
+   - Export reports as PDF/CSV
+
+3. **Data Quality Improvements**
+   - Transaction reconciliation interface
+   - Manual transaction editing with validation
+   - Transaction merging for duplicates
+
+### Technical Debt
+1. **Code Organization**
+   - Extract pattern matching logic into separate service
+   - Create transaction service layer
+   - Improve error handling consistency
+
+2. **Testing**
+   - Add unit tests for CSV parser
+   - Add integration tests for pattern matching
+   - Add E2E tests for CSV import flow
+
+3. **Documentation**
+   - API documentation for utilities
+   - User guide for CSV import
+   - Pattern matching algorithm documentation
