@@ -195,7 +195,7 @@ export const getColumnMapping = (format: BankFormat, headers: string[]): ColumnM
 };
 
 // Parse date string to ISO format
-const parseDate = (dateStr: string, format: string = 'YYYY-MM-DD'): string => {
+const parseDate = (dateStr: string): string => {
   if (!dateStr || !dateStr.trim()) {
     console.error('[csvParser] Empty date string');
     return new Date().toISOString().split('T')[0]; // Default to today
