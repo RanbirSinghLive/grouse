@@ -85,8 +85,6 @@ const BANK_FORMATS: Record<BankFormat, {
 
 // Detect bank format from CSV headers
 export const detectBankFormat = (headers: string[]): BankFormat | null => {
-  console.log('[csvParser] Detecting bank format from headers:', headers);
-  
   const normalizedHeaders = headers.map(h => h.trim().toLowerCase());
   
   for (const [format, config] of Object.entries(BANK_FORMATS)) {
@@ -101,20 +99,16 @@ export const detectBankFormat = (headers: string[]): BankFormat | null => {
       );
       
       if (allMatch) {
-        console.log('[csvParser] Detected format:', format);
         return format as BankFormat;
       }
     }
   }
   
-  console.log('[csvParser] No format detected, using generic');
   return 'generic';
 };
 
 // Get column mapping for a bank format
 export const getColumnMapping = (format: BankFormat, headers: string[]): ColumnMapping | null => {
-  console.log('[csvParser] Getting column mapping for format:', format, 'headers:', headers);
-  
   const normalizedHeaders = headers.map(h => h.trim().toLowerCase());
   
   if (format === 'generic') {
@@ -202,8 +196,6 @@ export const getColumnMapping = (format: BankFormat, headers: string[]): ColumnM
 
 // Parse date string to ISO format
 const parseDate = (dateStr: string, format: string = 'YYYY-MM-DD'): string => {
-  console.log('[csvParser] Parsing date:', dateStr, 'format:', format);
-  
   if (!dateStr || !dateStr.trim()) {
     console.error('[csvParser] Empty date string');
     return new Date().toISOString().split('T')[0]; // Default to today
@@ -275,30 +267,108 @@ const looksLikeHeader = (line: string): boolean => {
 
 // Auto-detect column structure for headerless CSV
 const detectColumnStructure = (firstDataLine: string[]): ColumnMapping | null => {
-  console.log('[csvParser] Detecting column structure from first data line:', firstDataLine);
-  
   // Common patterns:
   // Pattern 1: Date, Description, Debit, Credit, Balance (5 columns)
-  // Pattern 2: Date, Description, Amount, Balance (4 columns)
-  // Pattern 3: Date, Description, Amount (3 columns)
+  // Pattern 2: Date, Description, Debit, Credit (4 columns) - CIBC format
+  // Pattern 3: Date, Description, Amount, Balance (4 columns)
+  // Pattern 4: Date, Description, Amount (3 columns)
   
   if (firstDataLine.length >= 5) {
-    // Likely: Date, Description, Debit, Credit, Balance
-    return {
-      date: 'Date',
-      description: 'Description',
-      debit: 'Debit',
-      credit: 'Credit',
-      balance: 'Balance',
-    };
+    // Likely: Date, Description, Debit, Credit, Balance (or extra column like card number)
+    // Check if columns 2 and 3 (index 2, 3) look like Debit/Credit pattern
+    // In Debit/Credit pattern, typically one is empty and the other has a value
+    const col2 = firstDataLine[2]?.trim() || '';
+    const col3 = firstDataLine[3]?.trim() || '';
+    const col4 = firstDataLine[4]?.trim() || '';
+    
+    // Check if col2 and col3 look like numbers (debit/credit) or if one is empty
+    const col2IsNumber = /^\d+\.?\d*$/.test(col2);
+    const col3IsNumber = /^\d+\.?\d*$/.test(col3);
+    const col4IsNumber = /^\d+\.?\d*$/.test(col4);
+    
+    // If col2 and col3 are numbers and one is empty, it's Debit/Credit
+    // If col4 is a number, it might be Balance
+    if ((col2IsNumber || col3IsNumber) && (!col2 || !col3)) {
+      // Debit/Credit pattern
+      return {
+        date: 'Date',
+        description: 'Description',
+        debit: 'Debit',
+        credit: 'Credit',
+        balance: col4IsNumber ? 'Balance' : undefined,
+      };
+    } else if (col4IsNumber) {
+      // Likely: Date, Description, Debit, Credit, Balance
+      return {
+        date: 'Date',
+        description: 'Description',
+        debit: 'Debit',
+        credit: 'Credit',
+        balance: 'Balance',
+      };
+    } else {
+      // Extra column (like card number), but still Debit/Credit pattern
+      return {
+        date: 'Date',
+        description: 'Description',
+        debit: 'Debit',
+        credit: 'Credit',
+      };
+    }
   } else if (firstDataLine.length >= 4) {
-    // Likely: Date, Description, Amount, Balance
-    return {
-      date: 'Date',
-      description: 'Description',
-      amount: 'Amount',
-      balance: 'Balance',
-    };
+    // 4 columns - need to distinguish between:
+    // - Date, Description, Debit, Credit (CIBC format)
+    // - Date, Description, Amount, Balance
+    
+    const col2 = firstDataLine[2]?.trim() || '';
+    const col3 = firstDataLine[3]?.trim() || '';
+    
+    // Check if columns 2 and 3 look like Debit/Credit (one empty, one has value)
+    // vs Amount/Balance (both might have values)
+    // Use a more lenient number check that handles decimals and commas
+    const numberPattern = /^[\d,]+\.?\d*$/;
+    const col2IsNumber = col2 && numberPattern.test(col2.replace(/,/g, ''));
+    const col3IsNumber = col3 && numberPattern.test(col3.replace(/,/g, ''));
+    
+    // If one is empty and the other is a number, it's Debit/Credit
+    // Also check if both are numbers but one is significantly larger (likely Balance)
+    const col2Num = col2 ? parseFloat(col2.replace(/,/g, '')) : 0;
+    const col3Num = col3 ? parseFloat(col3.replace(/,/g, '')) : 0;
+    const isLikelyBalance = col3Num > 1000 && col2Num < col3Num; // Balance is usually larger
+    
+    if ((!col2 && col3IsNumber) || (col2IsNumber && !col3)) {
+      // Debit/Credit pattern (CIBC format) - one empty, one has value
+      return {
+        date: 'Date',
+        description: 'Description',
+        debit: 'Debit',
+        credit: 'Credit',
+      };
+    } else if (isLikelyBalance) {
+      // Likely: Date, Description, Amount, Balance (col3 is much larger, likely balance)
+      return {
+        date: 'Date',
+        description: 'Description',
+        amount: 'Amount',
+        balance: 'Balance',
+      };
+    } else if (col2IsNumber && col3IsNumber) {
+      // Both are numbers - default to Debit/Credit for CIBC format
+      return {
+        date: 'Date',
+        description: 'Description',
+        debit: 'Debit',
+        credit: 'Credit',
+      };
+    } else {
+      // Default to Debit/Credit for CIBC format (most common for 4-column headerless CSVs)
+      return {
+        date: 'Date',
+        description: 'Description',
+        debit: 'Debit',
+        credit: 'Credit',
+      };
+    }
   } else if (firstDataLine.length >= 3) {
     // Likely: Date, Description, Amount
     return {
@@ -313,8 +383,6 @@ const detectColumnStructure = (firstDataLine: string[]): ColumnMapping | null =>
 
 // Parse CSV file into raw transactions
 export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
-  console.log('[csvParser] Parsing CSV file:', file.name);
-  
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     
@@ -331,7 +399,18 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
         // Check if first line is a header
         const firstLine = lines[0];
         const firstLineValues = firstLine.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-        const hasHeader = looksLikeHeader(firstLine);
+        
+        // Check if first value looks like a date (YYYY-MM-DD or MM/DD/YYYY)
+        const firstValue = firstLineValues[0]?.trim() || '';
+        const looksLikeDate = /^\d{4}-\d{2}-\d{2}$/.test(firstValue) || /^\d{2}\/\d{2}\/\d{4}$/.test(firstValue);
+        
+        // If first value is a date, it's definitely not a header (it's data)
+        // Also check if second value looks like a description (not a header keyword)
+        const secondValue = firstLineValues[1]?.trim() || '';
+        const secondValueIsLong = secondValue.length > 20; // Descriptions are usually longer than header names
+        
+        // Header detection: if first value is a date OR second value is long (description), it's likely data
+        const hasHeader = !looksLikeDate && !secondValueIsLong && looksLikeHeader(firstLine);
         
         let headers: string[];
         let mapping: ColumnMapping | null;
@@ -339,7 +418,6 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
         
         if (hasHeader) {
           // Has header row
-          console.log('[csvParser] CSV has header row');
           headers = firstLineValues;
           dataStartIndex = 1;
           
@@ -353,7 +431,6 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
           }
         } else {
           // No header row - auto-detect structure
-          console.log('[csvParser] CSV has no header row, auto-detecting structure');
           dataStartIndex = 0;
           
           // Use first data line to detect structure
@@ -363,14 +440,22 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
             return;
           }
           
-          // Create synthetic headers for consistency
-          headers = [];
-          if (mapping.date) headers.push(mapping.date);
-          if (mapping.description) headers.push(mapping.description);
-          if (mapping.amount) headers.push(mapping.amount);
-          if (mapping.debit) headers.push(mapping.debit);
-          if (mapping.credit) headers.push(mapping.credit);
-          if (mapping.balance) headers.push(mapping.balance);
+          // For headerless CSVs, we assume standard column order:
+          // Position 0: Date
+          // Position 1: Description
+          // Position 2: Debit (if debit/credit format) or Amount (if single amount format)
+          // Position 3: Credit (if debit/credit format) or Balance (if single amount format)
+          // Position 4: Balance (if 5 columns) or extra column
+          
+          // Create synthetic headers that match the detected structure
+          headers = ['Date', 'Description'];
+          if (mapping.debit && mapping.credit) {
+            headers.push('Debit', 'Credit');
+            if (mapping.balance) headers.push('Balance');
+          } else if (mapping.amount) {
+            headers.push('Amount');
+            if (mapping.balance) headers.push('Balance');
+          }
           
           // Ensure we have at least date, description, and one amount field
           if (!mapping.date || !mapping.description || (!mapping.amount && !mapping.debit)) {
@@ -383,8 +468,6 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
           reject(new Error('Could not map CSV columns. Please check file format.'));
           return;
         }
-        
-        console.log('[csvParser] Using column mapping:', mapping);
         
         // Parse data rows
         const transactions: RawTransaction[] = [];
@@ -412,19 +495,31 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
           }
           values.push(current.trim()); // Last value
           
+          // For headerless CSVs, use positional indexing
+          // For CSVs with headers, use header name lookup
+          const getValue = (colName: string | undefined, position: number): string => {
+            if (!colName) return '';
+            if (!hasHeader) {
+              // Headerless: use position directly
+              return values[position] || '';
+            } else {
+              // Has header: find by header name
+              const idx = headers.indexOf(colName);
+              return idx >= 0 ? (values[idx] || '') : '';
+            }
+          };
+          
           // Create raw transaction
           const rawTx: RawTransaction = {
-            date: values[headers.indexOf(mapping.date)] || '',
-            description: values[headers.indexOf(mapping.description)] || '',
+            date: getValue(mapping.date, 0),
+            description: getValue(mapping.description, 1),
             amount: '',
           };
           
           // Handle amount based on format
           if (mapping.debit && mapping.credit) {
-            const debitIdx = headers.indexOf(mapping.debit);
-            const creditIdx = headers.indexOf(mapping.credit);
-            const debit = values[debitIdx] || '';
-            const credit = values[creditIdx] || '';
+            const debit = getValue(mapping.debit, 2);
+            const credit = getValue(mapping.credit, 3);
             
             // Check which column has a value (debit = expense, credit = income/refund)
             if (debit && debit.trim() && parseAmount(debit) > 0) {
@@ -435,7 +530,7 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
               rawTx.credit = credit;
             }
           } else if (mapping.amount) {
-            rawTx.amount = values[headers.indexOf(mapping.amount)] || '';
+            rawTx.amount = getValue(mapping.amount, 2);
           }
           
           // Store all raw data
@@ -451,7 +546,6 @@ export const parseCSV = async (file: File): Promise<RawTransaction[]> => {
           }
         }
         
-        console.log('[csvParser] Parsed', transactions.length, 'transactions');
         resolve(transactions);
       } catch (error) {
         console.error('[csvParser] Error parsing CSV:', error);
@@ -473,8 +567,6 @@ export const normalizeTransaction = (
   householdId: string,
   sourceFile?: string
 ): import('../types/models').Transaction => {
-  console.log('[csvParser] Normalizing transaction:', raw);
-  
   // Determine amount and transaction type
   let amount = 0;
   let isDebit = true; // Default to expense
@@ -517,9 +609,6 @@ export const normalizeTransaction = (
   if (amount > 0) {
     // Only set type if we have a valid amount
     initialType = isDebit ? 'expense' : 'income';
-    console.log('[csvParser] Setting type:', initialType, 'for transaction:', raw.description, 'isDebit:', isDebit, 'amount:', amount);
-  } else {
-    console.log('[csvParser] No amount or amount is 0, keeping as unclassified:', raw.description);
   }
 
   return {

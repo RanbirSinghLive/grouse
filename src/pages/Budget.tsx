@@ -29,6 +29,7 @@ export const Budget = () => {
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [viewMode, setViewMode] = useState<'recurring' | 'transactions'>('recurring');
 
+
   // Set default month to current month when switching to transactions view
   useEffect(() => {
     if (viewMode === 'transactions' && !selectedMonth) {
@@ -55,7 +56,6 @@ export const Budget = () => {
   // Filter transactions by selected month and other filters
   const filteredTransactions = viewMode === 'transactions' && selectedMonth
     ? existingTransactions.filter(tx => {
-        console.log('[Budget] Filtering transaction:', tx.description, 'date:', tx.date, 'selectedMonth:', selectedMonth);
         // Filter by month
         if (!tx.date) {
           console.warn('[Budget] Transaction missing date:', tx);
@@ -75,8 +75,6 @@ export const Budget = () => {
         return tx.type === 'income' || tx.type === 'expense';
       })
     : [];
-  
-  console.log('[Budget] View mode:', viewMode, 'Selected month:', selectedMonth, 'Filtered transactions:', filteredTransactions.length, 'Total transactions:', existingTransactions.length);
   
   // Apply all filters to cashflows
   const filteredCashflows = cashflows.filter(cf => {
@@ -131,36 +129,57 @@ export const Budget = () => {
   const hasActiveFilters = Object.values(filters).some(v => v !== '') || filterOwner !== '';
 
   const handleTransactionsParsed = (transactions: Transaction[]) => {
-    console.log('[Budget] Transactions parsed:', transactions.length);
-    console.log('[Budget] Existing transactions in store:', existingTransactions.length);
+    // ACCUMULATE with existing imported transactions (in case this is called multiple times)
+    // Only replace if state is empty (fresh upload)
+    let transactionsToProcess: Transaction[];
+    if (importedTransactions.length > 0) {
+      // Accumulate - merge transactions, avoiding duplicates by fingerprint
+      const existingFingerprints = new Set(importedTransactions.map(tx => tx.fingerprint));
+      const newUniqueTransactions = transactions.filter(tx => !existingFingerprints.has(tx.fingerprint));
+      transactionsToProcess = [...importedTransactions, ...newUniqueTransactions];
+    } else {
+      // Replace - this is a fresh upload, state is empty
+      transactionsToProcess = transactions;
+    }
     
-    // Check for duplicates against existing transactions (not against the same batch)
-    const { duplicates } = findDuplicates(transactions, existingTransactions, cashflows);
+    // Check for duplicates within the batch itself first
+    const batchFingerprints = new Map<string, Transaction>();
+    const duplicateIdsInBatch = new Set<string>();
+    transactionsToProcess.forEach(tx => {
+      const existing = batchFingerprints.get(tx.fingerprint);
+      if (existing) {
+        // Found duplicate within batch - keep the first one, mark subsequent ones as duplicate
+        duplicateIdsInBatch.add(tx.id);
+      } else {
+        batchFingerprints.set(tx.fingerprint, tx);
+      }
+    });
     
-    if (duplicates.length > 0) {
-      console.log('[Budget] Found', duplicates.length, 'duplicates');
-      // Mark duplicates as transfer to skip import (but preserve income/expense type if it was set)
-      const duplicateFingerprints = new Set(duplicates.map(d => d.fingerprint));
-      transactions.forEach(tx => {
-        if (duplicateFingerprints.has(tx.fingerprint)) {
-          console.log('[Budget] Marking duplicate as transfer:', tx.description, tx.fingerprint);
+    // Check for duplicates against existing transactions in store
+    // Only check transactions that aren't already duplicates within the batch
+    const nonBatchDuplicates = transactionsToProcess.filter(tx => !duplicateIdsInBatch.has(tx.id));
+    const { duplicates } = findDuplicates(nonBatchDuplicates, existingTransactions, cashflows);
+    const duplicateFingerprintsFromStore = new Set(duplicates.map(d => d.fingerprint));
+    
+    if (duplicates.length > 0 || duplicateIdsInBatch.size > 0) {
+      // Mark duplicates as transfer to skip import (but still show in review)
+      transactionsToProcess.forEach(tx => {
+        const isDuplicateInBatch = duplicateIdsInBatch.has(tx.id);
+        const isDuplicateFromStore = duplicateFingerprintsFromStore.has(tx.fingerprint);
+        
+        if (isDuplicateInBatch || isDuplicateFromStore) {
           tx.type = 'transfer'; // Mark as transfer to skip
         }
       });
     }
     
-    // Log transaction types for debugging
-    const typeCounts = transactions.reduce((acc, tx) => {
-      acc[tx.type] = (acc[tx.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    console.log('[Budget] Transaction type counts:', typeCounts);
-    
-    setImportedTransactions(transactions);
+    // Set all transactions (CSVUpload should combine all files, but we're handling accumulation just in case)
+    // IMPORTANT: We're setting ALL transactions, including those marked as 'transfer'
+    // The TransactionReview component will show them all, and the user can decide what to import
+    setImportedTransactions([...transactionsToProcess]);
   };
 
   const handleTransactionUpdate = (id: string, updates: Partial<Transaction>) => {
-    console.log('[Budget] Updating transaction:', id, updates);
     updateTransaction(id, updates);
     setImportedTransactions(prev =>
       prev.map(tx => tx.id === id ? { ...tx, ...updates } : tx)
@@ -168,7 +187,6 @@ export const Budget = () => {
   };
 
   const handleTransactionDelete = (id: string) => {
-    console.log('[Budget] Deleting transaction:', id);
     setImportedTransactions(prev => prev.filter(tx => tx.id !== id));
   };
 
@@ -176,8 +194,6 @@ export const Budget = () => {
   const existingCategories = [...new Set(cashflows.map(cf => cf.category).filter(Boolean))];
 
   const handleImport = (transactionsToImport: Transaction[]) => {
-    console.log('[Budget] Importing', transactionsToImport.length, 'transactions');
-    
     if (!household) {
       alert('No household set. Please set up your household in Settings first.');
       return;
@@ -242,18 +258,15 @@ export const Budget = () => {
   };
 
   const handleEdit = (id: string) => {
-    console.log('[Budget] Editing cashflow:', id);
     setEditingCashflow(id);
   };
 
   const handleDelete = (id: string) => {
     if (window.confirm('Are you sure you want to delete this cashflow?')) {
-      console.log('[Budget] Deleting cashflow:', id);
       deleteCashflow(id);
     }
   };
 
-  console.log('[Budget] Rendering with', cashflows.length, 'cashflows');
 
   return (
     <div>

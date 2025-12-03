@@ -10,35 +10,62 @@ interface CSVUploadProps {
 export const CSVUpload = ({ onTransactionsParsed, householdId }: CSVUploadProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
+  const [parsingProgress, setParsingProgress] = useState<{ current: number; total: number; currentFile: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = async (file: File) => {
-    if (!file.name.endsWith('.csv')) {
-      setError('Please upload a CSV file');
+  const handleFiles = async (files: FileList | File[]) => {
+    const csvFiles = Array.from(files).filter(file => file.name.endsWith('.csv'));
+    
+    if (csvFiles.length === 0) {
+      setError('Please upload CSV files');
       return;
     }
 
     setIsParsing(true);
     setError(null);
+    setParsingProgress({ current: 0, total: csvFiles.length, currentFile: csvFiles[0].name });
 
     try {
-      console.log('[CSVUpload] Parsing file:', file.name);
-      const rawTransactions = await parseCSV(file);
-      console.log('[CSVUpload] Parsed', rawTransactions.length, 'raw transactions');
+      const allTransactions: Transaction[] = [];
+      const errors: string[] = [];
 
-      // Normalize transactions
-      const transactions: Transaction[] = rawTransactions.map(raw =>
-        normalizeTransaction(raw, householdId, file.name)
-      );
+      // Process files sequentially to show progress
+      for (let i = 0; i < csvFiles.length; i++) {
+        const file = csvFiles[i];
+        setParsingProgress({ current: i + 1, total: csvFiles.length, currentFile: file.name });
+        
+        try {
+          const rawTransactions = await parseCSV(file);
 
-      console.log('[CSVUpload] Normalized', transactions.length, 'transactions');
-      onTransactionsParsed(transactions);
+          // Normalize transactions
+          const transactions: Transaction[] = rawTransactions.map(raw =>
+            normalizeTransaction(raw, householdId, file.name)
+          );
+
+          allTransactions.push(...transactions);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : 'Failed to parse CSV file';
+          console.error('[CSVUpload] Error parsing', file.name, ':', err);
+          errors.push(`${file.name}: ${errorMsg}`);
+        }
+      }
+
+      if (allTransactions.length > 0) {
+        onTransactionsParsed(allTransactions);
+      } else if (errors.length === 0) {
+        console.warn('[CSVUpload] No transactions found in uploaded files');
+      }
+
+      if (errors.length > 0) {
+        setError(`Some files failed to parse:\n${errors.join('\n')}`);
+      }
     } catch (err) {
-      console.error('[CSVUpload] Error parsing CSV:', err);
-      setError(err instanceof Error ? err.message : 'Failed to parse CSV file');
+      console.error('[CSVUpload] Error processing files:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process CSV files');
     } finally {
       setIsParsing(false);
+      setParsingProgress(null);
     }
   };
 
@@ -46,9 +73,9 @@ export const CSVUpload = ({ onTransactionsParsed, householdId }: CSVUploadProps)
     e.preventDefault();
     setIsDragging(false);
 
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      handleFile(file);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleFiles(files);
     }
   };
 
@@ -63,9 +90,9 @@ export const CSVUpload = ({ onTransactionsParsed, householdId }: CSVUploadProps)
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleFile(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleFiles(files);
     }
   };
 
@@ -90,6 +117,7 @@ export const CSVUpload = ({ onTransactionsParsed, householdId }: CSVUploadProps)
           ref={fileInputRef}
           type="file"
           accept=".csv"
+          multiple
           onChange={handleFileInput}
           className="hidden"
           disabled={isParsing}
@@ -98,7 +126,19 @@ export const CSVUpload = ({ onTransactionsParsed, householdId }: CSVUploadProps)
         {isParsing ? (
           <div className="flex flex-col items-center gap-4">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            <p className="text-gray-600 font-medium">Parsing CSV file...</p>
+            <p className="text-gray-600 font-medium">
+              {parsingProgress 
+                ? `Parsing file ${parsingProgress.current} of ${parsingProgress.total}: ${parsingProgress.currentFile}`
+                : 'Parsing CSV files...'}
+            </p>
+            {parsingProgress && (
+              <div className="w-full max-w-xs bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(parsingProgress.current / parsingProgress.total) * 100}%` }}
+                />
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center gap-4">
@@ -110,7 +150,7 @@ export const CSVUpload = ({ onTransactionsParsed, householdId }: CSVUploadProps)
                 Upload Bank Statement (CSV)
               </p>
               <p className="text-sm text-gray-600">
-                Drag & drop or click to browse
+                Drag & drop or click to browse (multiple files supported)
               </p>
             </div>
             <p className="text-xs text-gray-500">
