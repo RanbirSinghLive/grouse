@@ -84,8 +84,71 @@ Investment accounts (TFSA, RRSP, DCPP, RESP, non_registered) can optionally trac
 - Use **LocalStorage** for persistence.
 - Support export/import of data as single `.json` file (full replace on import with warning).
 - Price cache stored separately in LocalStorage with 5-minute expiration.
+- Transaction and pattern data stored separately from main app data for better organization.
 
-### F. Owner Management
+### F. CSV Import & Transaction Management
+Users can import bank statements via CSV files to track actual spending and income:
+
+**CSV Upload:**
+- **Multiple File Support:** Drag and drop or select multiple CSV files at once
+- **Progress Tracking:** Shows progress bar and current file being processed
+- **Bank Format Support:** Auto-detects and parses formats from:
+  - TD (Toronto-Dominion Bank)
+  - RBC (Royal Bank of Canada)
+  - Scotiabank
+  - BMO (Bank of Montreal)
+  - CIBC (Canadian Imperial Bank of Commerce)
+  - Tangerine
+  - Generic CSV formats (with or without headers)
+- **Header Detection:** Intelligently detects if CSV has headers or is headerless by checking if first column is a date
+- **Date Format Support:** Handles both YYYY-MM-DD and MM/DD/YYYY formats
+- **Debit/Credit Columns:** Supports both single amount column and separate debit/credit column formats
+
+**Transaction Review:**
+- All imported transactions displayed in review interface for categorization
+- **Type Classification:** Users can mark transactions as Income, Expense, Transfer, or Unclassified
+- **Category Assignment:** Autocomplete dropdown with existing categories from cashflows, transactions, and learned patterns
+- **Pattern Matching:** AI-driven suggestions based on learned patterns (description-biased matching)
+- **One-Click Accept:** Quick accept button for suggested pattern matches
+- **Bulk Operations:** Select multiple transactions for bulk category/type updates
+- **Delete Transactions:** Remove unwanted transactions from review
+
+**Pattern Learning:**
+- System learns from user classifications to improve future suggestions
+- **Description-Weighted Matching:** Prioritizes transaction description keywords over amount
+- **Confidence Scoring:** Patterns have confidence scores (0-100) that adjust based on user feedback
+- **Pattern Storage:** Learned patterns persist across sessions
+- **Category Propagation:** Pattern matches suggest categories automatically
+
+**Duplicate Detection:**
+- **Fingerprint-Based:** Uses date, amount (rounded), and normalized description to create unique fingerprints
+- **Fuzzy Matching:** Detects similar transactions (same date, similar amount, similar description)
+- **Within-Batch Detection:** Identifies duplicates within the same import batch
+- **Store Comparison:** Checks against existing transactions in store
+- **Automatic Marking:** Duplicates marked as "transfer" to skip import (but still visible in review)
+
+**Month-by-Month Budgeting:**
+- **Transaction View Mode:** Toggle between recurring cashflows and historical transactions
+- **Month Selector:** Choose specific month to view transactions for that period
+- **Category Grouping:** Transactions grouped by category within selected month
+- **Budget Chart:** Shows actual spending vs income by category for selected month
+- **Date Display:** Transaction dates displayed in table (formatted as "Jan 15, 2024")
+
+**Category Management:**
+- **Settings Integration:** Category management section in Settings page
+- **Rename Categories:** Edit category names with inline editing
+- **Global Updates:** Category renames propagate to all cashflows, transactions, and patterns
+- **Usage Tracking:** Shows how many entries use each category
+- **Duplicate Prevention:** Prevents creating duplicate category names
+
+### G. Category Management
+- **Settings Integration:** Category management section in Settings page
+- **Rename Categories:** Edit category names with inline editing (Enter to save, Escape to cancel)
+- **Global Updates:** Category renames propagate to all cashflows, transactions, and learned patterns
+- **Usage Tracking:** Shows count of how many entries use each category
+- **Duplicate Prevention:** Prevents creating duplicate category names
+
+### H. Owner Management
 
 Users can define multiple owners (e.g., "Person 1", "Person 2", "Joint") in Settings:
 - **Household Owners:** List of people/entities that can be assigned to accounts and cashflows
@@ -94,7 +157,7 @@ Users can define multiple owners (e.g., "Person 1", "Person 2", "Joint") in Sett
 - **Display:** Empty owner field displays as "All / Household" instead of "-"
 - **Filtering:** Accounts and Budget pages support owner filter buttons to view data by person
 
-### G. UX & Navigation
+### I. UX & Navigation
 
 **Routes:**
 - `/` → Dashboard (key totals + charts)
@@ -105,11 +168,13 @@ Users can define multiple owners (e.g., "Person 1", "Person 2", "Joint") in Sett
 **Form UX:**
 - Single form at top of page + table/list below
 - Create mode: empty form
-- Edit mode: clicking row loads item into same form
+- Edit mode: clicking row loads item into same form (form scrolls into view automatically)
 - Validation: basic hard validation on submit, soft hints on blur
 - Default values: sensible defaults (e.g., kind="asset", frequency="monthly", currency="CAD")
 - Number inputs: Show empty string when value is 0 to avoid "stray zeros"
 - Account type formatting: Acronyms (TFSA, RRSP, DCPP, RESP) displayed in uppercase
+- **Category Autocomplete:** Dropdown with all existing categories, keyboard navigation support
+- **Table Filtering:** Header-based filtering for cashflow/transaction tables (Name, Type, Category, Frequency, Owner)
 
 **UI Design:**
 - Colorful gradients and modern styling (blue, emerald, purple, red, teal color schemes)
@@ -320,6 +385,10 @@ const formatAccountType = (type: Account['type']): string => {
 | Tax Insights | Approximate CPP/OAS and RRSP deduction effects |
 | Cloud Sync | Optional Supabase/Firebase backend |
 | Multi-scenario Management | Save multiple financial plans |
+| CSV Import Enhancements | Direct bank API integration, automatic categorization improvements |
+| Transaction Rules | User-defined rules for automatic transaction categorization |
+| Budget Alerts | Notifications when spending exceeds budgeted amounts |
+| Recurring Transaction Detection | Automatically identify and convert recurring transactions to cashflows |
 
 ---
 
@@ -353,6 +422,8 @@ const formatAccountType = (type: Account['type']): string => {
     AssetMixChart.tsx
     BudgetChart.tsx
     CashflowGauge.tsx
+    CSVUpload.tsx
+    TransactionReview.tsx
   /store
     useHouseholdStore.ts
   /pages
@@ -364,6 +435,11 @@ const formatAccountType = (type: Account['type']): string => {
     calculations.ts
     storage.ts
     stockApi.ts
+    csvParser.ts
+    duplicateDetector.ts
+    patternMatcher.ts
+    patternLearner.ts
+    confirmDialog.tsx
   /types
     models.ts
   App.tsx
