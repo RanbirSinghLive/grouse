@@ -41,17 +41,9 @@ Each entry supports:
 - `name`, `type`, `amount`, `frequency`, `account linkage`, and optional metadata.
 
 ### B. Calculations
-
-**Core Metrics:**
 - **Net Worth:** Assets − Liabilities  
 - **Monthly Cashflow:** Income − Expenses  
 - **Savings Rate:** Surplus ÷ Income  
-
-**Personal Finance Best Practice Metrics:**
-- **Emergency Fund Coverage:** Liquid assets (cash + chequing) ÷ Monthly expenses (in months)
-- **Debt-to-Income Ratio:** Monthly debt payments ÷ Monthly income × 100
-- **Debt-to-Asset Ratio:** Total liabilities ÷ Total assets × 100
-- **Real Estate Equity:** (Primary home + Rental properties) − All mortgages (shows equity amount, percentage, and total value)  
 
 ### C. Charts and Visualizations
 
@@ -65,99 +57,11 @@ Each chart auto-updates when the data store changes.
 
 **Note:** Net Worth Timeline omitted in v0.1 (no historical tracking).
 
-### D. Holdings Tracking (Investment Accounts)
-
-Investment accounts (TFSA, RRSP, DCPP, RESP, non_registered) can optionally track individual holdings (stocks/ETFs):
-
-- **Manual Entry (Phase 1):** Users can manually enter ticker, shares, and current price
-- **API Price Updates (Phase 2):** Integration with Alpha Vantage API to fetch current prices
-  - Free tier: 5 calls per minute, 500 calls per day
-  - 5-minute cache to reduce API calls
-  - Supports Canadian tickers (`.TO` suffix) and US tickers
-  - Special handling for "CASH" holding type (price = 1.0)
-  - Progress feedback during bulk price refresh
-  - Error handling with fallback to existing prices if API fails
-- **Balance Calculation:** If `useHoldings=true`, account balance is calculated as sum of (shares × currentPrice) for all holdings
-- **Ticker Autocomplete:** Form remembers previously entered tickers for faster data entry
-
-### E. Data Persistence
+### D. Data Persistence
 - Use **LocalStorage** for persistence.
 - Support export/import of data as single `.json` file (full replace on import with warning).
-- Price cache stored separately in LocalStorage with 5-minute expiration.
-- Transaction and pattern data stored separately from main app data for better organization.
 
-### F. CSV Import & Transaction Management
-Users can import bank statements via CSV files to track actual spending and income:
-
-**CSV Upload:**
-- **Multiple File Support:** Drag and drop or select multiple CSV files at once
-- **Progress Tracking:** Shows progress bar and current file being processed
-- **Bank Format Support:** Auto-detects and parses formats from:
-  - TD (Toronto-Dominion Bank)
-  - RBC (Royal Bank of Canada)
-  - Scotiabank
-  - BMO (Bank of Montreal)
-  - CIBC (Canadian Imperial Bank of Commerce)
-  - Tangerine
-  - Generic CSV formats (with or without headers)
-- **Header Detection:** Intelligently detects if CSV has headers or is headerless by checking if first column is a date
-- **Date Format Support:** Handles both YYYY-MM-DD and MM/DD/YYYY formats
-- **Debit/Credit Columns:** Supports both single amount column and separate debit/credit column formats
-
-**Transaction Review:**
-- All imported transactions displayed in review interface for categorization
-- **Type Classification:** Users can mark transactions as Income, Expense, Transfer, or Unclassified
-- **Category Assignment:** Autocomplete dropdown with existing categories from cashflows, transactions, and learned patterns
-- **Pattern Matching:** AI-driven suggestions based on learned patterns (description-biased matching)
-- **One-Click Accept:** Quick accept button for suggested pattern matches
-- **Bulk Operations:** Select multiple transactions for bulk category/type updates
-- **Delete Transactions:** Remove unwanted transactions from review
-
-**Pattern Learning:**
-- System learns from user classifications to improve future suggestions
-- **Description-Weighted Matching:** Prioritizes transaction description keywords over amount
-- **Confidence Scoring:** Patterns have confidence scores (0-100) that adjust based on user feedback
-- **Pattern Storage:** Learned patterns persist across sessions
-- **Category Propagation:** Pattern matches suggest categories automatically
-
-**Duplicate Detection:**
-- **Fingerprint-Based:** Uses date, amount (rounded), and normalized description to create unique fingerprints
-- **Fuzzy Matching:** Detects similar transactions (same date, similar amount, similar description)
-- **Within-Batch Detection:** Identifies duplicates within the same import batch
-- **Store Comparison:** Checks against existing transactions in store
-- **Automatic Marking:** Duplicates marked as "transfer" to skip import (but still visible in review)
-
-**Month-by-Month Budgeting:**
-- **Transaction View Mode:** Toggle between recurring cashflows and historical transactions
-- **Month Selector:** Choose specific month to view transactions for that period
-- **Category Grouping:** Transactions grouped by category within selected month
-- **Budget Chart:** Shows actual spending vs income by category for selected month
-- **Date Display:** Transaction dates displayed in table (formatted as "Jan 15, 2024")
-
-**Category Management:**
-- **Settings Integration:** Category management section in Settings page
-- **Rename Categories:** Edit category names with inline editing
-- **Global Updates:** Category renames propagate to all cashflows, transactions, and patterns
-- **Usage Tracking:** Shows how many entries use each category
-- **Duplicate Prevention:** Prevents creating duplicate category names
-
-### G. Category Management
-- **Settings Integration:** Category management section in Settings page
-- **Rename Categories:** Edit category names with inline editing (Enter to save, Escape to cancel)
-- **Global Updates:** Category renames propagate to all cashflows, transactions, and learned patterns
-- **Usage Tracking:** Shows count of how many entries use each category
-- **Duplicate Prevention:** Prevents creating duplicate category names
-
-### H. Owner Management
-
-Users can define multiple owners (e.g., "Person 1", "Person 2", "Joint") in Settings:
-- **Household Owners:** List of people/entities that can be assigned to accounts and cashflows
-- **Account Owner:** Optional field to filter and roll up accounts by owner
-- **Cashflow Owner:** Optional field to filter and roll up incomes/expenses by owner
-- **Display:** Empty owner field displays as "All / Household" instead of "-"
-- **Filtering:** Accounts and Budget pages support owner filter buttons to view data by person
-
-### I. UX & Navigation
+### E. UX & Navigation
 
 **Routes:**
 - `/` → Dashboard (key totals + charts)
@@ -168,23 +72,9 @@ Users can define multiple owners (e.g., "Person 1", "Person 2", "Joint") in Sett
 **Form UX:**
 - Single form at top of page + table/list below
 - Create mode: empty form
-- Edit mode: clicking row loads item into same form (form scrolls into view automatically)
+- Edit mode: clicking row loads item into same form
 - Validation: basic hard validation on submit, soft hints on blur
-- Default values: sensible defaults (e.g., kind="asset", frequency="monthly", currency="CAD")
-- Number inputs: Show empty string when value is 0 to avoid "stray zeros"
-- Account type formatting: Acronyms (TFSA, RRSP, DCPP, RESP) displayed in uppercase
-- **Category Autocomplete:** Dropdown with all existing categories, keyboard navigation support
-- **Table Filtering:** Header-based filtering for cashflow/transaction tables (Name, Type, Category, Frequency, Owner)
-
-**UI Design:**
-- Colorful gradients and modern styling (blue, emerald, purple, red, teal color schemes)
-- Boxed layouts with shadows, borders, and hover effects (scale and shadow transitions)
-- Improved button styles with icons, gradients, and hover states
-- Desktop-first design (no dark mode)
-- Sticky navigation header with gradient background
-- Metric cards with emoji icons and status indicators
-- Form inputs with focus states and error styling
-- Responsive grid layouts for dashboard metrics  
+- Default values: sensible defaults (e.g., kind="asset", frequency="monthly", currency="CAD")  
 
 ---
 
@@ -196,20 +86,6 @@ type Household = {
   id: string;
   name: string;
   province?: string; // Optional, non-functional in v0.1
-  owners?: string[]; // List of owners/people (e.g., ["Person 1", "Person 2", "Joint"])
-};
-```
-
-### Holdings (stocks/ETFs within investment accounts)
-```ts
-type Holding = {
-  id: string;
-  accountId: string;
-  ticker: string; // e.g., "VTI", "XEQT.TO", "CASH"
-  shares: number; // Number of shares owned
-  currentPrice: number; // Current price per share (manual entry or API-fetched)
-  currency: 'CAD' | 'USD';
-  lastPriceUpdate?: string; // ISO timestamp of last price update
 };
 ```
 
@@ -220,17 +96,11 @@ type Account = {
   householdId: string;
   name: string;
   kind: 'asset' | 'liability';
-  type: 'cash' | 'chequing' | 'tfsa' | 'rrsp' | 'dcpp' | 'resp' | 'non_registered' |
+  type: 'cash' | 'chequing' | 'tfsa' | 'rrsp' | 'non_registered' |
         'primary_home' | 'rental_property' | 'mortgage' | 'loan' | 'credit_card';
-  balance: number; // Manual balance OR calculated from holdings if useHoldings=true
+  balance: number;
   currency: 'CAD' | 'USD'; // CAD-only experience in v0.1, but field kept in model
   interestRate?: number;
-  owner?: string; // Owner of the account (e.g., "Person 1", "Person 2", "Joint", "Household")
-  useHoldings?: boolean; // If true, calculate balance from holdings; if false, use manual balance
-  holdings?: Holding[]; // Holdings for investment accounts (TFSA, RRSP, DCPP, RESP, non_registered)
-  // Mortgage-specific fields for projections
-  monthlyPayment?: number; // Monthly payment amount
-  termRemainingMonths?: number; // Remaining term in months
   updatedAt: string;
 };
 ```
@@ -245,7 +115,6 @@ type Cashflow = {
   category: string;
   amount: number;
   frequency: 'monthly' | 'biweekly' | 'weekly' | 'annual';
-  owner?: string; // Owner of the income/expense (e.g., "Person 1", "Person 2", "Joint", "Household")
   sourceAccountId?: string; // Optional, mostly ignored in v0.1 logic
   targetAccountId?: string; // Optional, mostly ignored in v0.1 logic
   startDate?: string;
@@ -294,69 +163,6 @@ const calcSavingsRate = (flows: Cashflow[]): number => {
   if (income === 0) return 0;
   return (calcMonthlyCashflow(flows) / income) * 100;
 };
-
-// Calculate total assets
-const calcTotalAssets = (accounts: Account[]): number =>
-  accounts.filter(a => a.kind === 'asset').reduce((sum, a) => sum + a.balance, 0);
-
-// Calculate total liabilities
-const calcTotalLiabilities = (accounts: Account[]): number =>
-  accounts.filter(a => a.kind === 'liability').reduce((sum, a) => sum + a.balance, 0);
-
-// Calculate liquid assets (cash + chequing)
-const calcLiquidAssets = (accounts: Account[]): number =>
-  accounts.filter(a => a.kind === 'asset' && (a.type === 'cash' || a.type === 'chequing'))
-          .reduce((sum, a) => sum + a.balance, 0);
-
-// Calculate emergency fund coverage in months
-const calcEmergencyFundCoverage = (accounts: Account[], cashflows: Cashflow[]): number => {
-  const liquidAssets = calcLiquidAssets(accounts);
-  const monthlyExpenses = calcMonthlyExpenses(cashflows);
-  if (monthlyExpenses <= 0) return Infinity;
-  return liquidAssets / monthlyExpenses;
-};
-
-// Calculate debt-to-income ratio (monthly debt payments / monthly income)
-const calcDebtToIncomeRatio = (accounts: Account[], cashflows: Cashflow[]): number => {
-  const monthlyIncome = calcMonthlyIncome(cashflows);
-  if (monthlyIncome === 0) return 0;
-  const monthlyDebtPayments = accounts
-    .filter(a => a.kind === 'liability' && (a.type === 'mortgage' || a.type === 'loan') && a.monthlyPayment)
-    .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0);
-  return (monthlyDebtPayments / monthlyIncome) * 100;
-};
-
-// Calculate debt-to-asset ratio
-const calcDebtToAssetRatio = (accounts: Account[]): number => {
-  const totalAssets = calcTotalAssets(accounts);
-  if (totalAssets === 0) return 0;
-  const totalLiabilities = calcTotalLiabilities(accounts);
-  return (totalLiabilities / totalAssets) * 100;
-};
-
-// Calculate real estate equity (primary home + rental properties vs all mortgages)
-const calcRealEstateEquity = (accounts: Account[]): { equity: number; percentage: number; totalValue: number } | null => {
-  const realEstateAssets = accounts.filter(a => a.kind === 'asset' && (a.type === 'primary_home' || a.type === 'rental_property'));
-  const totalRealEstateValue = realEstateAssets.reduce((sum, a) => sum + a.balance, 0);
-  const mortgages = accounts.filter(a => a.type === 'mortgage' && a.kind === 'liability');
-  const totalMortgageBalance = mortgages.reduce((sum, a) => sum + a.balance, 0);
-  if (totalRealEstateValue === 0 && totalMortgageBalance === 0) return null;
-  const equity = totalRealEstateValue - totalMortgageBalance;
-  const percentage = totalRealEstateValue > 0 ? (equity / totalRealEstateValue) * 100 : 0;
-  return { equity, percentage, totalValue: totalRealEstateValue };
-};
-
-// Helper to format account types for display (TFSA, RRSP, DCPP, RESP in uppercase)
-const formatAccountType = (type: Account['type']): string => {
-  const acronyms: Record<string, string> = {
-    'tfsa': 'TFSA',
-    'rrsp': 'RRSP',
-    'dcpp': 'DCPP',
-    'resp': 'RESP',
-  };
-  if (acronyms[type]) return acronyms[type];
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-};
 ```
 
 ---
@@ -368,11 +174,10 @@ const formatAccountType = (type: Account['type']): string => {
 | Frontend | React + TypeScript + Vite |
 | Routing | React Router |
 | Charts | Recharts |
-| Styling | TailwindCSS v4 (custom, desktop-first, no dark mode, colorful gradients) |
+| Styling | TailwindCSS (custom, desktop-first, no dark mode) |
 | State | Zustand |
 | Storage | LocalStorage |
 | Export/Import | Single JSON file (full replace) |
-| Stock API | Alpha Vantage (free tier: 5 calls/min, 500 calls/day) |
 
 ---
 
@@ -385,10 +190,6 @@ const formatAccountType = (type: Account['type']): string => {
 | Tax Insights | Approximate CPP/OAS and RRSP deduction effects |
 | Cloud Sync | Optional Supabase/Firebase backend |
 | Multi-scenario Management | Save multiple financial plans |
-| CSV Import Enhancements | Direct bank API integration, automatic categorization improvements |
-| Transaction Rules | User-defined rules for automatic transaction categorization |
-| Budget Alerts | Notifications when spending exceeds budgeted amounts |
-| Recurring Transaction Detection | Automatically identify and convert recurring transactions to cashflows |
 
 ---
 
@@ -422,8 +223,6 @@ const formatAccountType = (type: Account['type']): string => {
     AssetMixChart.tsx
     BudgetChart.tsx
     CashflowGauge.tsx
-    CSVUpload.tsx
-    TransactionReview.tsx
   /store
     useHouseholdStore.ts
   /pages
@@ -434,12 +233,6 @@ const formatAccountType = (type: Account['type']): string => {
   /utils
     calculations.ts
     storage.ts
-    stockApi.ts
-    csvParser.ts
-    duplicateDetector.ts
-    patternMatcher.ts
-    patternLearner.ts
-    confirmDialog.tsx
   /types
     models.ts
   App.tsx
@@ -451,17 +244,10 @@ const formatAccountType = (type: Account['type']): string => {
 For Asset Mix Breakdown chart, group accounts into 5 categories:
 
 1. **Cash & Cash-like**: `cash`, `chequing`
-2. **Registered Investments**: `tfsa`, `rrsp`, `dcpp`, `resp` (future: `fhsa`, `lira`)
+2. **Registered Investments**: `tfsa`, `rrsp` (future: `fhsa`, `resp`, `lira`)
 3. **Non-Registered Investments**: `non_registered`
 4. **Real Estate**: `primary_home`, `rental_property`
 5. **Other Assets**: Any other types (e.g., vehicle, business)
-
-**Color Scheme:**
-- Cash & Cash-like: Blue
-- Registered Investments: Green
-- Non-Registered Investments: Purple
-- Real Estate: Orange
-- Other Assets: Gray
 
 ---
 
@@ -470,136 +256,7 @@ For Asset Mix Breakdown chart, group accounts into 5 categories:
 - Snapshot tests for calculations.
 - Chart rendering smoke tests.
 - LocalStorage persistence verification.
-- API rate limiting and caching verification.
 - Manual UX test flow:
   1. Add one income + one expense + one asset + one liability.
   2. Reload browser → values persist.
   3. Dashboard and charts reflect updated totals.
-  4. Add investment account with holdings.
-  5. Test price refresh API integration.
-  6. Test owner filtering and roll-up.
-
-## 13. 🔧 Implementation Details
-
-### Holdings Tracking
-- Investment accounts (TFSA, RRSP, DCPP, RESP, non_registered) can enable `useHoldings` flag
-- When enabled, account balance is calculated from holdings: `sum(shares × currentPrice)`
-- Holdings support manual price entry or API-fetched prices via Alpha Vantage
-- Special "CASH" ticker type for cash holdings within investment accounts (price = 1.0)
-- Ticker autocomplete remembers previously entered tickers
-
-### API Integration (Alpha Vantage)
-- **Rate Limiting:** 12-second delay between API calls (5 calls per minute)
-- **Caching:** 5-minute cache duration to reduce API calls
-- **Canadian Ticker Support:** Automatically tries `.TO` suffix for Canadian stocks
-- **Error Handling:** Falls back to existing price if API fails, displays error message
-- **Progress Feedback:** Shows current ticker and progress during bulk refresh
-- **Retry Logic:** Attempts alternative ticker formats for Canadian class shares (e.g., BTCC.B)
-
-### Mortgage Fields
-- `monthlyPayment`: Monthly payment amount for debt-to-income calculations
-- `termRemainingMonths`: Remaining term in months for future projection calculations
-- Only displayed/editable when account type is "mortgage"
-
-### Owner Management
-- Owners defined in Settings → Household section
-- Accounts and cashflows can be assigned to specific owners
-- Filter buttons on Accounts and Budget pages to view by owner
-- Empty owner displays as "All / Household" in UI
-- Supports multi-person households (e.g., couples) with roll-up capabilities
-
-### CSV Import Implementation
-- **Parser:** Handles multiple bank formats with auto-detection
-- **Header Detection:** Checks if first column is a date to distinguish headers from data
-- **Column Mapping:** Auto-detects column structure for headerless CSVs (4-column vs 5-column patterns)
-- **Date Parsing:** Supports YYYY-MM-DD, MM/DD/YYYY, and other common formats
-- **Amount Parsing:** Handles both single amount column and separate debit/credit columns
-- **Transaction Accumulation:** Combines transactions from multiple files, avoiding duplicates
-- **Error Handling:** Continues processing remaining files if one fails, shows error summary
-- **Multi-file Support:** Processes multiple CSV files in sequence with progress tracking
-
-### Pattern Matching Algorithm
-- **Description-Weighted:** Prioritizes transaction description keywords over amount
-- **Keyword Extraction:** Removes common words, numbers, and special characters
-- **Confidence Scoring:** Starts at 50%, increases with successful matches, decreases with failures
-- **Amount Tolerance:** Patterns created with 50%-200% amount range for flexibility
-- **Type Matching:** Matches against transaction `isDebit` flag (derived from debit/credit columns)
-- **Pattern Updates:** Confidence adjusts based on user feedback (accept/reject suggestions)
-- **Auto-fill:** High-confidence matches (≥70%) automatically suggest categories
-
----
-
-## 14. 🚀 Recommended Next Steps
-
-### Immediate Priorities (v0.1 Completion)
-1. **Testing & Bug Fixes**
-   - Test CSV import with various bank formats
-   - Verify duplicate detection accuracy
-   - Test pattern learning with real transaction data
-   - Validate month-by-month budgeting calculations
-
-2. **UX Polish**
-   - Improve error messages for failed CSV parsing
-   - Add loading states for large CSV imports
-   - Enhance transaction review table with sorting
-   - Add export functionality for categorized transactions
-
-3. **Performance Optimization**
-   - Optimize pattern matching for large transaction sets
-   - Implement pagination or virtualization for large transaction lists
-   - Cache pattern matches to avoid re-computation
-
-### Short-term Enhancements (v0.2)
-1. **Transaction Rules Engine**
-   - User-defined rules for automatic categorization (e.g., "If description contains 'AMAZON', category = 'Shopping'")
-   - Rule priority and conflict resolution
-   - Rule testing interface
-
-2. **Budget Analysis**
-   - Compare actual spending vs budgeted amounts by category
-   - Spending trends over time (month-over-month comparisons)
-   - Budget variance alerts
-
-3. **Recurring Transaction Detection**
-   - Automatically identify recurring transactions
-   - Suggest converting to cashflows
-   - One-click conversion from transaction to recurring cashflow
-
-4. **Enhanced Filtering & Search**
-   - Full-text search across transactions
-   - Date range filtering
-   - Amount range filtering
-   - Multi-category filtering
-
-### Medium-term Features (v0.3+)
-1. **Forecast Engine Integration**
-   - Use actual transaction history to inform projections
-   - Seasonal spending patterns
-   - Income variability modeling
-
-2. **Reporting & Analytics**
-   - Spending reports by category, owner, time period
-   - Income vs expense trends
-   - Category spending breakdowns
-   - Export reports as PDF/CSV
-
-3. **Data Quality Improvements**
-   - Transaction reconciliation interface
-   - Manual transaction editing with validation
-   - Transaction merging for duplicates
-
-### Technical Debt
-1. **Code Organization**
-   - Extract pattern matching logic into separate service
-   - Create transaction service layer
-   - Improve error handling consistency
-
-2. **Testing**
-   - Add unit tests for CSV parser
-   - Add integration tests for pattern matching
-   - Add E2E tests for CSV import flow
-
-3. **Documentation**
-   - API documentation for utilities
-   - User guide for CSV import
-   - Pattern matching algorithm documentation

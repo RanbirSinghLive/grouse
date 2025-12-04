@@ -1,86 +1,70 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
-import { normalizeMonthly } from '../utils/calculations';
-import type { Cashflow, Transaction } from '../types/models';
+import { calculateCategoryAverages, calculateMonthlyTotals } from '../utils/calculations';
+import type { Transaction } from '../types/models';
 
 interface BudgetChartProps {
-  cashflows: Cashflow[];
-  transactions?: Transaction[]; // Optional transactions for month-by-month view
+  transactions: Transaction[];
   selectedMonth?: string; // YYYY-MM format, if provided shows only that month
 }
 
-export const BudgetChart = ({ cashflows, transactions = [], selectedMonth }: BudgetChartProps) => {
-  console.log('[BudgetChart] Rendering with cashflows:', cashflows.length, 'transactions:', transactions.length);
+export const BudgetChart = ({ transactions = [], selectedMonth }: BudgetChartProps) => {
+  console.log('[BudgetChart] Rendering with transactions:', transactions.length, 'selectedMonth:', selectedMonth);
 
-  // If transactions are provided and a month is selected, use transaction data
-  // Otherwise, use cashflows (recurring budget)
-  const useTransactions = transactions.length > 0 && selectedMonth;
+  // If a month is selected, show that month's data
+  // Otherwise, show averages across all months
+  const useSpecificMonth = selectedMonth !== undefined && selectedMonth !== '';
 
-  let categoryData: Record<string, { amount: number; type: 'income' | 'expense' }> = {};
+  let data: Array<{
+    category: string;
+    amount: number;
+    type: 'income' | 'expense';
+    trendPercentage?: number;
+    trendDirection?: 'up' | 'down' | 'stable';
+  }> = [];
 
-  if (useTransactions) {
-    // Group transactions by category for the selected month
-    const monthStart = `${selectedMonth}-01`;
-    const [year, month] = selectedMonth.split('-');
-    const nextMonth = month === '12' ? `${parseInt(year) + 1}-01` : `${year}-${String(parseInt(month) + 1).padStart(2, '0')}`;
-    const monthEnd = `${nextMonth}-01`;
-
-    transactions
-      .filter(tx => {
-        const txDate = tx.date;
-        return txDate >= monthStart && txDate < monthEnd && 
-               (tx.type === 'income' || tx.type === 'expense') && 
-               tx.category;
-      })
-      .forEach(tx => {
-        const category = tx.category!;
-        // Type guard ensures tx.type is 'income' | 'expense' (filtered above)
-        const txType = tx.type as 'income' | 'expense';
-        if (!categoryData[category]) {
-          categoryData[category] = {
-            amount: tx.amount,
-            type: txType,
-          };
-        } else {
-          categoryData[category].amount += tx.amount;
-        }
-      });
-  } else {
-    // Group cashflows by category (recurring budget)
-    cashflows.forEach(cf => {
-      const monthlyAmount = normalizeMonthly(cf.amount, cf.frequency);
-      const category = cf.category;
-      
-      if (!categoryData[category]) {
-        categoryData[category] = {
-          amount: monthlyAmount,
-          type: cf.type,
-        };
-      } else {
-        categoryData[category].amount += monthlyAmount;
+  if (useSpecificMonth) {
+    // Show specific month's totals
+    const monthlyTotals = calculateMonthlyTotals(transactions, selectedMonth);
+    data = Object.entries(monthlyTotals).map(([category, { amount, type }]) => ({
+      category,
+      amount,
+      type,
+    })).sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'income' ? -1 : 1;
       }
+      return b.amount - a.amount;
     });
+  } else {
+    // Show averages with trends
+    const averages = calculateCategoryAverages(transactions);
+    data = averages.map(avg => ({
+      category: avg.category,
+      amount: avg.averageAmount,
+      type: avg.type,
+      trendPercentage: avg.trendPercentage,
+      trendDirection: avg.trendDirection,
+    }));
   }
 
-  const data = Object.entries(categoryData).map(([category, { amount, type }]) => ({
-    category,
-    amount,
-    type,
-  })).sort((a, b) => {
-    // Sort by type (income first), then by amount (descending)
-    if (a.type !== b.type) {
-      return a.type === 'income' ? -1 : 1;
-    }
-    return b.amount - a.amount;
-  });
+  // Format month for display
+  const formatMonth = (monthStr: string | undefined): string => {
+    if (!monthStr) return '';
+    const [year, monthNum] = monthStr.split('-');
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthName = monthNames[parseInt(monthNum) - 1];
+    return `${monthName} ${year}`;
+  };
 
   if (data.length === 0) {
     return (
       <div className="bg-white p-6 rounded-lg shadow-md">
         <h3 className="text-lg font-bold mb-4">
-          {useTransactions ? `Monthly Budget Flow - ${selectedMonth}` : 'Monthly Budget Flow'}
+          {useSpecificMonth ? `Monthly Budget Flow - ${formatMonth(selectedMonth)}` : 'Average Monthly Budget Flow'}
         </h3>
         <p className="text-gray-500">
-          {useTransactions ? 'No transactions for this month' : 'No cashflows to display'}
+          {useSpecificMonth ? 'No transactions for this month' : 'No transaction data available'}
         </p>
       </div>
     );
@@ -90,33 +74,70 @@ export const BudgetChart = ({ cashflows, transactions = [], selectedMonth }: Bud
     <div className="bg-gradient-to-br from-white to-blue-50 p-6 rounded-2xl shadow-lg border-2 border-blue-200">
       <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
         <span className="text-2xl">📈</span>
-        {useTransactions ? `Monthly Budget Flow - ${selectedMonth}` : 'Monthly Budget Flow (Recurring)'}
+        {useSpecificMonth ? `Monthly Budget Flow - ${formatMonth(selectedMonth)}` : 'Average Monthly Budget Flow (with Trends)'}
       </h3>
       <ResponsiveContainer width="100%" height={400}>
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="category" />
+          <XAxis 
+            dataKey="category" 
+            angle={-45}
+            textAnchor="end"
+            height={100}
+          />
           <YAxis />
           <Tooltip
             formatter={(value: number, _name: string, props: any) => {
               const type = props.payload.type;
-              return [
+              const trend = props.payload.trendPercentage;
+              const trendDir = props.payload.trendDirection;
+              
+              let tooltipContent = [
                 `$${value.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 type.charAt(0).toUpperCase() + type.slice(1)
               ];
+              
+              if (trend !== undefined && !useSpecificMonth) {
+                const trendIcon = trendDir === 'up' ? '📈' : trendDir === 'down' ? '📉' : '➡️';
+                const trendColor = trendDir === 'up' ? '#10b981' : trendDir === 'down' ? '#ef4444' : '#6b7280';
+                tooltipContent.push(
+                  `${trendIcon} ${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`
+                );
+              }
+              
+              return tooltipContent;
             }}
             labelFormatter={(label) => label}
+            contentStyle={{
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+              padding: '8px',
+            }}
           />
           <Legend 
             formatter={() => ''}
           />
           <Bar dataKey="amount">
-            {data.map((entry, index) => (
-              <Cell 
-                key={`cell-${index}`}
-                fill={entry.type === 'income' ? '#10b981' : '#ef4444'}
-              />
-            ))}
+            {data.map((entry, index) => {
+              // Color bars based on trend if available
+              let fillColor = entry.type === 'income' ? '#10b981' : '#ef4444';
+              
+              if (entry.trendDirection && !useSpecificMonth) {
+                if (entry.trendDirection === 'up') {
+                  fillColor = entry.type === 'income' ? '#059669' : '#dc2626'; // Darker for up trend
+                } else if (entry.trendDirection === 'down') {
+                  fillColor = entry.type === 'income' ? '#34d399' : '#f87171'; // Lighter for down trend
+                }
+              }
+              
+              return (
+                <Cell 
+                  key={`cell-${index}`}
+                  fill={fillColor}
+                />
+              );
+            })}
           </Bar>
         </BarChart>
       </ResponsiveContainer>

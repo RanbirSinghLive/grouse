@@ -1,126 +1,108 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
-import { CashflowForm } from '../components/CashflowForm';
 import { BudgetChart } from '../components/BudgetChart';
 import { CSVUpload } from '../components/CSVUpload';
 import { TransactionReview } from '../components/TransactionReview';
-import { normalizeMonthly } from '../utils/calculations';
+import { calculateCategoryAverages, getAvailableMonths } from '../utils/calculations';
 import { findDuplicates } from '../utils/duplicateDetector';
 import { learnFromClassification } from '../utils/patternLearner';
 import type { Transaction } from '../types/models';
 
 export const Budget = () => {
   const {
-    cashflows,
     household,
     patterns,
     transactions: existingTransactions,
-    deleteCashflow,
     deleteTransaction,
-    setEditingCashflow,
     addTransactions,
     updateTransaction,
-    addCashflow,
     addPattern,
     updatePattern,
   } = useHouseholdStore();
   const [filterOwner, setFilterOwner] = useState<string>('');
   const [importedTransactions, setImportedTransactions] = useState<Transaction[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'recurring' | 'transactions'>('recurring');
+  const [viewMode, setViewMode] = useState<'averages' | 'month'>('averages');
 
 
-  // Set default month to current month when switching to transactions view
+  // Set default month to current month when switching to month view
   useEffect(() => {
-    if (viewMode === 'transactions' && !selectedMonth) {
+    if (viewMode === 'month' && !selectedMonth) {
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
       setSelectedMonth(`${year}-${month}`);
     }
   }, [viewMode, selectedMonth]);
+
   const [filters, setFilters] = useState({
-    name: '',
     type: '',
     category: '',
-    frequency: '',
     owner: '',
   });
 
   const owners = household?.owners || [];
   
-  // Get unique values for filter dropdowns
-  const uniqueCategories = [...new Set(cashflows.map(cf => cf.category).filter(Boolean))].sort();
-  const uniqueFrequencies = [...new Set(cashflows.map(cf => cf.frequency))].sort();
+  // Get available months from transactions
+  const availableMonths = useMemo(() => getAvailableMonths(existingTransactions), [existingTransactions]);
   
-  // Filter transactions by selected month and other filters
-  const filteredTransactions = viewMode === 'transactions' && selectedMonth
-    ? existingTransactions.filter(tx => {
-        // Filter by month
-        if (!tx.date) {
-          console.warn('[Budget] Transaction missing date:', tx);
-          return false;
-        }
-        const txMonth = tx.date.substring(0, 7); // YYYY-MM
-        if (txMonth !== selectedMonth) return false;
-        
-        // Apply other filters
-        if (filters.name && !tx.description.toLowerCase().includes(filters.name.toLowerCase())) return false;
-        if (filters.type && tx.type !== filters.type) return false;
-        if (filters.category && tx.category !== filters.category) return false;
-        if (filters.owner && tx.owner !== filters.owner) return false;
-        if (filterOwner && tx.owner && tx.owner !== filterOwner) return false;
-        
-        // Only show income/expense transactions
-        return tx.type === 'income' || tx.type === 'expense';
-      })
-    : [];
+  // Calculate category averages from all transactions
+  const categoryAverages = useMemo(() => {
+    console.log('[Budget] Calculating category averages from', existingTransactions.length, 'transactions');
+    return calculateCategoryAverages(existingTransactions);
+  }, [existingTransactions]);
   
-  // Apply all filters to cashflows
-  const filteredCashflows = cashflows.filter(cf => {
-    // Owner filter (from existing filter)
-    if (filterOwner && cf.owner && cf.owner !== filterOwner) {
-      return false;
-    }
+  // Get unique categories from averages
+  const uniqueCategories = useMemo(() => {
+    return [...new Set(categoryAverages.map(avg => avg.category).filter(Boolean))].sort();
+  }, [categoryAverages]);
+  
+  // Filter category averages
+  const filteredAverages = useMemo(() => {
+    return categoryAverages.filter(avg => {
+      if (filterOwner && avg.category && filterOwner !== '') {
+        // Note: averages don't have owner info, so we'd need to filter transactions first
+        // For now, we'll skip owner filtering on averages
+      }
+      
+      if (filters.type && avg.type !== filters.type) {
+        return false;
+      }
+      
+      if (filters.category && avg.category !== filters.category) {
+        return false;
+      }
+      
+      return true;
+    });
+  }, [categoryAverages, filters, filterOwner]);
+  
+  // Filter transactions for month view
+  const filteredTransactions = useMemo(() => {
+    if (viewMode !== 'month' || !selectedMonth) return [];
     
-    // Name filter
-    if (filters.name && !cf.name.toLowerCase().includes(filters.name.toLowerCase())) {
-      return false;
-    }
-    
-    // Type filter
-    if (filters.type && cf.type !== filters.type) {
-      return false;
-    }
-    
-    // Category filter
-    if (filters.category && cf.category !== filters.category) {
-      return false;
-    }
-    
-    // Frequency filter
-    if (filters.frequency && cf.frequency !== filters.frequency) {
-      return false;
-    }
-    
-    // Owner filter (from filters state)
-    if (filters.owner && cf.owner !== filters.owner) {
-      return false;
-    }
-    
-    return true;
-  });
+    return existingTransactions.filter(tx => {
+      if (!tx.date) return false;
+      const txMonth = tx.date.substring(0, 7);
+      if (txMonth !== selectedMonth) return false;
+      
+      if (filters.type && tx.type !== filters.type) return false;
+      if (filters.category && tx.category !== filters.category) return false;
+      if (filters.owner && tx.owner && tx.owner !== filters.owner) return false;
+      if (filterOwner && tx.owner && tx.owner !== filterOwner) return false;
+      
+      return tx.type === 'income' || tx.type === 'expense';
+    });
+  }, [viewMode, selectedMonth, existingTransactions, filters, filterOwner]);
   
   const handleFilterChange = (key: keyof typeof filters, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   };
-  
+
   const clearFilters = () => {
     setFilters({
-      name: '',
       type: '',
       category: '',
-      frequency: '',
       owner: '',
     });
     setFilterOwner('');
@@ -158,7 +140,7 @@ export const Budget = () => {
     // Check for duplicates against existing transactions in store
     // Only check transactions that aren't already duplicates within the batch
     const nonBatchDuplicates = transactionsToProcess.filter(tx => !duplicateIdsInBatch.has(tx.id));
-    const { duplicates } = findDuplicates(nonBatchDuplicates, existingTransactions, cashflows);
+    const { duplicates } = findDuplicates(nonBatchDuplicates, existingTransactions, []);
     const duplicateFingerprintsFromStore = new Set(duplicates.map(d => d.fingerprint));
     
     if (duplicates.length > 0 || duplicateIdsInBatch.size > 0) {
@@ -189,9 +171,6 @@ export const Budget = () => {
   const handleTransactionDelete = (id: string) => {
     setImportedTransactions(prev => prev.filter(tx => tx.id !== id));
   };
-
-  // Get existing categories from cashflows for autocomplete
-  const existingCategories = [...new Set(cashflows.map(cf => cf.category).filter(Boolean))];
 
   const handleImport = (transactionsToImport: Transaction[]) => {
     if (!household) {
@@ -233,20 +212,6 @@ export const Budget = () => {
       }
     });
 
-    // Convert transactions to cashflows
-    transactionsToImport.forEach(tx => {
-      if (tx.type === 'income' || tx.type === 'expense') {
-        addCashflow({
-          name: tx.description,
-          type: tx.type,
-          category: tx.category || 'Uncategorized',
-          amount: tx.amount,
-          frequency: 'monthly', // CSV imports are typically monthly
-          owner: tx.owner,
-        });
-      }
-    });
-
     // Reset import state
     setImportedTransactions([]);
     
@@ -257,15 +222,10 @@ export const Budget = () => {
     setImportedTransactions([]);
   };
 
-  const handleEdit = (id: string) => {
-    setEditingCashflow(id);
-  };
-
-  const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this cashflow?')) {
-      deleteCashflow(id);
-    }
-  };
+  // Get existing categories from transactions for autocomplete
+  const existingCategories = useMemo(() => {
+    return [...new Set(existingTransactions.map(tx => tx.category).filter((cat): cat is string => Boolean(cat)))];
+  }, [existingTransactions]);
 
 
   return (
@@ -336,46 +296,55 @@ export const Budget = () => {
         </div>
       )}
 
-      <CashflowForm />
-
       {/* View Mode Toggle */}
       <div className="mb-6 flex items-center gap-4">
         <span className="text-sm font-medium text-gray-700">View:</span>
         <button
-          onClick={() => setViewMode('recurring')}
+          onClick={() => setViewMode('averages')}
           className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-            viewMode === 'recurring'
+            viewMode === 'averages'
               ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
               : 'bg-white text-gray-700 border-2 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          Recurring Budget
+          Category Averages
         </button>
         <button
-          onClick={() => setViewMode('transactions')}
+          onClick={() => setViewMode('month')}
           className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-            viewMode === 'transactions'
+            viewMode === 'month'
               ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
               : 'bg-white text-gray-700 border-2 border-gray-300 hover:bg-gray-50'
           }`}
         >
           Month-by-Month
         </button>
-        {viewMode === 'transactions' && (
-          <input
-            type="month"
+        {viewMode === 'month' && (
+          <select
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
             className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          >
+            <option value="">Select Month</option>
+            {availableMonths.map(month => {
+              const [year, monthNum] = month.split('-');
+              const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                                  'July', 'August', 'September', 'October', 'November', 'December'];
+              const monthName = monthNames[parseInt(monthNum) - 1];
+              return (
+                <option key={month} value={month}>
+                  {monthName} {year}
+                </option>
+              );
+            })}
+          </select>
         )}
       </div>
 
       <div className="mb-6">
         <BudgetChart 
-          cashflows={viewMode === 'recurring' ? filteredCashflows : []} 
-          transactions={viewMode === 'transactions' ? existingTransactions : []}
-          selectedMonth={viewMode === 'transactions' ? selectedMonth : undefined}
+          transactions={viewMode === 'averages' ? existingTransactions : filteredTransactions}
+          selectedMonth={viewMode === 'month' ? selectedMonth : undefined}
         />
       </div>
 
@@ -383,19 +352,6 @@ export const Budget = () => {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50/50">
             <tr>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                <div className="flex flex-col gap-1">
-                  <span>Name</span>
-                  <input
-                    type="text"
-                    value={filters.name}
-                    onChange={(e) => handleFilterChange('name', e.target.value)}
-                    placeholder="Filter..."
-                    className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
-              </th>
               <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                 <div className="flex flex-col gap-1">
                   <span>Type</span>
@@ -427,31 +383,32 @@ export const Budget = () => {
                   </select>
                 </div>
               </th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount</th>
-              {viewMode === 'recurring' ? (
+              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                Average Monthly Amount
+              </th>
+              {viewMode === 'averages' ? (
                 <>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    <div className="flex flex-col gap-1">
-                      <span>Frequency</span>
-                      <select
-                        value={filters.frequency}
-                        onChange={(e) => handleFilterChange('frequency', e.target.value)}
-                        className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <option value="">All</option>
-                        {uniqueFrequencies.map(freq => (
-                          <option key={freq} value={freq}>{freq.charAt(0).toUpperCase() + freq.slice(1)}</option>
-                        ))}
-                      </select>
-                    </div>
+                    Trend
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Monthly</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Months of Data
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Transaction Count
+                  </th>
                 </>
               ) : (
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</th>
+                <>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Description
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Date
+                  </th>
+                </>
               )}
-              {owners.length > 0 && (
+              {owners.length > 0 && viewMode === 'month' && (
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   <div className="flex flex-col gap-1">
                     <span>Owner</span>
@@ -469,60 +426,51 @@ export const Budget = () => {
                   </div>
                 </th>
               )}
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+              {viewMode === 'month' && (
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-100">
-            {viewMode === 'recurring' ? (
-              // Show cashflows in recurring view
-              filteredCashflows.map((cashflow) => {
-                const monthlyAmount = normalizeMonthly(cashflow.amount, cashflow.frequency);
+            {viewMode === 'averages' ? (
+              // Show category averages with trends
+              filteredAverages.map((avg) => {
+                const trendIcon = avg.trendDirection === 'up' ? '📈' : avg.trendDirection === 'down' ? '📉' : '➡️';
+                const trendColor = avg.trendDirection === 'up' 
+                  ? 'text-emerald-600' 
+                  : avg.trendDirection === 'down' 
+                  ? 'text-red-600' 
+                  : 'text-gray-500';
+                
                 return (
                   <tr
-                    key={cashflow.id}
-                    className="hover:bg-blue-50/50 cursor-pointer transition-colors"
-                    onClick={() => handleEdit(cashflow.id)}
+                    key={`${avg.category}-${avg.type}`}
+                    className="hover:bg-blue-50/50 transition-colors"
                   >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{cashflow.name}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                        cashflow.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                        avg.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
                       }`}>
-                        {cashflow.type}
+                        {avg.type}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{cashflow.category}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      ${cashflow.amount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 capitalize">{cashflow.frequency}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{avg.category}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                      ${monthlyAmount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${avg.averageAmount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
-                    {owners.length > 0 && (
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{cashflow.owner || 'All / Household'}</td>
-                    )}
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <div className="flex gap-3">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEdit(cashflow.id);
-                          }}
-                          className="px-4 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-semibold hover:bg-emerald-200 transition-all"
-                        >
-                          ✏️ Edit
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(cashflow.id);
-                          }}
-                          className="px-4 py-1.5 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-all"
-                        >
-                          🗑️ Delete
-                        </button>
-                      </div>
+                      <span className={`flex items-center gap-1 ${trendColor}`}>
+                        <span>{trendIcon}</span>
+                        <span className="font-semibold">
+                          {avg.trendPercentage >= 0 ? '+' : ''}{avg.trendPercentage.toFixed(1)}%
+                        </span>
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {avg.monthsWithData}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {avg.transactionCount}
                     </td>
                   </tr>
                 );
@@ -538,7 +486,7 @@ export const Budget = () => {
                       dateDisplay = date.toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
                     } else {
                       console.warn('[Budget] Invalid date for transaction:', tx.id, tx.date);
-                      dateDisplay = tx.date; // Show raw date if can't parse
+                      dateDisplay = tx.date;
                     }
                   } catch (e) {
                     console.error('[Budget] Error parsing date:', tx.date, e);
@@ -553,7 +501,6 @@ export const Budget = () => {
                     key={tx.id}
                     className="hover:bg-blue-50/50 transition-colors"
                   >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{tx.description}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
                         tx.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
@@ -565,6 +512,7 @@ export const Budget = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       ${tx.amount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{tx.description}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {dateDisplay}
                     </td>
@@ -601,12 +549,16 @@ export const Budget = () => {
             )}
           </tbody>
         </table>
-        {viewMode === 'recurring' && filteredCashflows.length === 0 && (
+        {viewMode === 'averages' && filteredAverages.length === 0 && (
           <div className="p-12 text-center">
-            <p className="text-gray-500 text-sm">No cashflows found. Add your first income or expense above.</p>
+            <p className="text-gray-500 text-sm">
+              {existingTransactions.length === 0 
+                ? 'No transaction data available. Import CSV files to see category averages.' 
+                : 'No categories match the current filters.'}
+            </p>
           </div>
         )}
-        {viewMode === 'transactions' && filteredTransactions.length === 0 && (
+        {viewMode === 'month' && filteredTransactions.length === 0 && (
           <div className="p-12 text-center">
             <p className="text-gray-500 text-sm">
               {selectedMonth ? `No transactions found for ${selectedMonth}.` : 'Select a month to view transactions.'}

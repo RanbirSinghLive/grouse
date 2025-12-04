@@ -1,4 +1,4 @@
-import type { Account, Cashflow } from '../types/models';
+import type { Account, Cashflow, Transaction } from '../types/models';
 
 // Normalize any frequency to monthly amount
 export const normalizeMonthly = (amount: number, frequency: Cashflow['frequency']): number => {
@@ -174,4 +174,286 @@ export const calcRealEstateEquity = (accounts: Account[]): { equity: number; per
 
 // Alias for Dashboard compatibility
 export const calcMortgageEquity = calcRealEstateEquity;
+
+// ============================================================================
+// Transaction-based Budget Calculations (Averages & Trends)
+// ============================================================================
+
+export type CategoryAverage = {
+  category: string;
+  type: 'income' | 'expense';
+  averageAmount: number;
+  transactionCount: number;
+  monthsWithData: number;
+  trendPercentage: number; // Percentage change over time
+  trendDirection: 'up' | 'down' | 'stable';
+};
+
+// Get all unique months from transactions
+export const getAvailableMonths = (transactions: Transaction[]): string[] => {
+  const months = new Set<string>();
+  transactions.forEach(tx => {
+    if (tx.date) {
+      const month = tx.date.substring(0, 7); // YYYY-MM
+      months.add(month);
+    }
+  });
+  return Array.from(months).sort();
+};
+
+// Calculate monthly totals by category and type
+export const calculateMonthlyTotals = (
+  transactions: Transaction[],
+  month: string
+): Record<string, { amount: number; type: 'income' | 'expense' }> => {
+  const totals: Record<string, { amount: number; type: 'income' | 'expense' }> = {};
+  
+  const monthStart = `${month}-01`;
+  const [year, monthNum] = month.split('-');
+  const nextMonth = monthNum === '12' 
+    ? `${parseInt(year) + 1}-01` 
+    : `${year}-${String(parseInt(monthNum) + 1).padStart(2, '0')}-01`;
+  
+  transactions
+    .filter(tx => {
+      if (!tx.date || !tx.category) return false;
+      const txDate = tx.date;
+      return txDate >= monthStart && 
+             txDate < nextMonth && 
+             (tx.type === 'income' || tx.type === 'expense');
+    })
+    .forEach(tx => {
+      const category = tx.category!;
+      const txType = tx.type as 'income' | 'expense';
+      
+      if (!totals[category]) {
+        totals[category] = { amount: tx.amount, type: txType };
+      } else {
+        totals[category].amount += tx.amount;
+      }
+    });
+  
+  return totals;
+};
+
+// Calculate average monthly amount by category and type
+export const calculateCategoryAverages = (
+  transactions: Transaction[]
+): CategoryAverage[] => {
+  console.log('[calculations] calculateCategoryAverages: processing', transactions.length, 'transactions');
+  
+  const availableMonths = getAvailableMonths(transactions);
+  console.log('[calculations] Available months:', availableMonths);
+  
+  if (availableMonths.length === 0) {
+    console.log('[calculations] No months with data found');
+    return [];
+  }
+  
+  // Group transactions by category and type
+  const categoryMap = new Map<string, { 
+    type: 'income' | 'expense';
+    monthlyTotals: number[];
+    transactionCount: number;
+  }>();
+  
+  // Calculate totals for each month
+  availableMonths.forEach(month => {
+    const monthlyTotals = calculateMonthlyTotals(transactions, month);
+    
+    Object.entries(monthlyTotals).forEach(([category, { amount, type }]) => {
+      const key = `${category}|${type}`;
+      if (!categoryMap.has(key)) {
+        categoryMap.set(key, {
+          type,
+          monthlyTotals: [],
+          transactionCount: 0,
+        });
+      }
+      const entry = categoryMap.get(key)!;
+      entry.monthlyTotals.push(amount);
+    });
+  });
+  
+  // Count transactions per category
+  transactions
+    .filter(tx => tx.category && (tx.type === 'income' || tx.type === 'expense'))
+    .forEach(tx => {
+      const key = `${tx.category}|${tx.type}`;
+      const entry = categoryMap.get(key);
+      if (entry) {
+        entry.transactionCount += 1;
+      }
+    });
+  
+  // Calculate averages and trends
+  // Use total months with ANY data as denominator for more realistic budgeting
+  const totalMonthsWithData = availableMonths.length;
+  console.log('[calculations] Total months with any transaction data:', totalMonthsWithData);
+  
+  const averages: CategoryAverage[] = [];
+  
+  categoryMap.forEach((data, key) => {
+    const [category, typeStr] = key.split('|');
+    const type = typeStr as 'income' | 'expense';
+    
+    const monthlyTotals = data.monthlyTotals;
+    const monthsWithData = monthlyTotals.length;
+    
+    if (monthsWithData === 0) return;
+    
+    // Calculate average - divide by total months with ANY data, not just months with this category
+    // This gives a more realistic monthly budget expectation
+    const total = monthlyTotals.reduce((sum, val) => sum + val, 0);
+    const averageAmount = totalMonthsWithData > 0 ? total / totalMonthsWithData : 0;
+    
+    // Calculate trend (compare first half vs second half of available months)
+    let trendPercentage = 0;
+    let trendDirection: 'up' | 'down' | 'stable' = 'stable';
+    
+    if (monthsWithData >= 2) {
+      const midPoint = Math.floor(monthsWithData / 2);
+      const firstHalf = monthlyTotals.slice(0, midPoint);
+      const secondHalf = monthlyTotals.slice(midPoint);
+      
+      const firstHalfAvg = firstHalf.reduce((sum, val) => sum + val, 0) / firstHalf.length;
+      const secondHalfAvg = secondHalf.reduce((sum, val) => sum + val, 0) / secondHalf.length;
+      
+      if (firstHalfAvg > 0) {
+        trendPercentage = ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100;
+        
+        // Determine direction with a threshold (5% change to be considered significant)
+        if (Math.abs(trendPercentage) < 5) {
+          trendDirection = 'stable';
+        } else if (trendPercentage > 0) {
+          trendDirection = 'up';
+        } else {
+          trendDirection = 'down';
+        }
+      }
+    }
+    
+    averages.push({
+      category,
+      type,
+      averageAmount,
+      transactionCount: data.transactionCount,
+      monthsWithData,
+      trendPercentage,
+      trendDirection,
+    });
+  });
+  
+  console.log('[calculations] calculateCategoryAverages: result', averages);
+  return averages.sort((a, b) => {
+    // Sort by type (income first), then by average amount (descending)
+    if (a.type !== b.type) {
+      return a.type === 'income' ? -1 : 1;
+    }
+    return b.averageAmount - a.averageAmount;
+  });
+};
+
+// Calculate trend percentage between two periods
+export const calculateTrendPercentage = (
+  currentPeriod: number,
+  previousPeriod: number
+): number => {
+  if (previousPeriod === 0) {
+    return currentPeriod > 0 ? 100 : 0;
+  }
+  return ((currentPeriod - previousPeriod) / previousPeriod) * 100;
+};
+
+// ============================================================================
+// Transaction-based Cash Flow Calculations (for Dashboard)
+// ============================================================================
+
+// Calculate average monthly income from transactions
+export const calcMonthlyIncomeFromTransactions = (transactions: Transaction[]): number => {
+  console.log('[calculations] calcMonthlyIncomeFromTransactions: processing', transactions.length, 'transactions');
+  const averages = calculateCategoryAverages(transactions);
+  const incomeTotal = averages
+    .filter(avg => avg.type === 'income')
+    .reduce((sum, avg) => sum + avg.averageAmount, 0);
+  console.log('[calculations] calcMonthlyIncomeFromTransactions: result', incomeTotal);
+  return incomeTotal;
+};
+
+// Calculate average monthly expenses from transactions
+export const calcMonthlyExpensesFromTransactions = (transactions: Transaction[]): number => {
+  console.log('[calculations] calcMonthlyExpensesFromTransactions: processing', transactions.length, 'transactions');
+  const averages = calculateCategoryAverages(transactions);
+  const expensesTotal = averages
+    .filter(avg => avg.type === 'expense')
+    .reduce((sum, avg) => sum + avg.averageAmount, 0);
+  console.log('[calculations] calcMonthlyExpensesFromTransactions: result', expensesTotal);
+  return expensesTotal;
+};
+
+// Calculate average monthly cashflow from transactions
+export const calcMonthlyCashflowFromTransactions = (transactions: Transaction[]): number => {
+  console.log('[calculations] calcMonthlyCashflowFromTransactions: processing', transactions.length, 'transactions');
+  const income = calcMonthlyIncomeFromTransactions(transactions);
+  const expenses = calcMonthlyExpensesFromTransactions(transactions);
+  const cashflow = income - expenses;
+  console.log('[calculations] calcMonthlyCashflowFromTransactions: result', cashflow);
+  return cashflow;
+};
+
+// Calculate savings rate from transactions
+export const calcSavingsRateFromTransactions = (transactions: Transaction[]): number => {
+  console.log('[calculations] calcSavingsRateFromTransactions: processing', transactions.length, 'transactions');
+  const income = calcMonthlyIncomeFromTransactions(transactions);
+  if (income === 0) {
+    console.log('[calculations] calcSavingsRateFromTransactions: no income, returning 0');
+    return 0;
+  }
+  const cashflow = calcMonthlyCashflowFromTransactions(transactions);
+  const savingsRate = (cashflow / income) * 100;
+  console.log('[calculations] calcSavingsRateFromTransactions: result', savingsRate);
+  return savingsRate;
+};
+
+// Calculate emergency fund coverage in months (using transactions)
+export const calcEmergencyFundCoverageFromTransactions = (
+  accounts: Account[],
+  transactions: Transaction[]
+): number => {
+  console.log('[calculations] calcEmergencyFundCoverageFromTransactions: processing');
+  const liquidAssets = calcLiquidAssets(accounts);
+  const monthlyExpenses = calcMonthlyExpensesFromTransactions(transactions);
+  if (monthlyExpenses <= 0) {
+    console.log('[calculations] calcEmergencyFundCoverageFromTransactions: no expenses, returning Infinity');
+    return Infinity;
+  }
+  const coverage = liquidAssets / monthlyExpenses;
+  console.log('[calculations] calcEmergencyFundCoverageFromTransactions: result', coverage);
+  return coverage;
+};
+
+// Alias for Dashboard compatibility
+export const calcEmergencyFundMonthsFromTransactions = calcEmergencyFundCoverageFromTransactions;
+
+// Calculate debt-to-income ratio (using transactions)
+export const calcDebtToIncomeRatioFromTransactions = (
+  accounts: Account[],
+  transactions: Transaction[]
+): number => {
+  console.log('[calculations] calcDebtToIncomeRatioFromTransactions: processing');
+  const monthlyIncome = calcMonthlyIncomeFromTransactions(transactions);
+  if (monthlyIncome === 0) {
+    console.log('[calculations] calcDebtToIncomeRatioFromTransactions: no income, returning 0');
+    return 0;
+  }
+
+  // Sum monthly payments from mortgages and loans
+  const monthlyDebtPayments = accounts
+    .filter(a => a.kind === 'liability' && (a.type === 'mortgage' || a.type === 'loan') && a.monthlyPayment)
+    .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0);
+
+  const ratio = (monthlyDebtPayments / monthlyIncome) * 100;
+  console.log('[calculations] calcDebtToIncomeRatioFromTransactions: result', ratio);
+  return ratio;
+};
 

@@ -1,10 +1,10 @@
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import {
   calcNetWorth,
-  calcMonthlyCashflow,
-  calcSavingsRate,
-  calcEmergencyFundMonths,
-  calcDebtToIncomeRatio,
+  calcMonthlyCashflowFromTransactions,
+  calcSavingsRateFromTransactions,
+  calcEmergencyFundMonthsFromTransactions,
+  calcDebtToIncomeRatioFromTransactions,
   calcDebtToAssetRatio,
   calcMortgageEquity,
   calcTotalAssets,
@@ -13,18 +13,18 @@ import { AssetMixChart } from '../components/AssetMixChart';
 import { CashflowGauge } from '../components/CashflowGauge';
 
 export const Dashboard = () => {
-  const { accounts, cashflows } = useHouseholdStore();
+  const { accounts, transactions } = useHouseholdStore();
 
   const netWorth = calcNetWorth(accounts);
-  const monthlyCashflow = calcMonthlyCashflow(cashflows);
-  const savingsRate = calcSavingsRate(cashflows);
-  const emergencyFundMonths = calcEmergencyFundMonths(accounts, cashflows);
-  const debtToIncomeRatio = calcDebtToIncomeRatio(accounts, cashflows);
+  const monthlyCashflow = calcMonthlyCashflowFromTransactions(transactions);
+  const savingsRate = calcSavingsRateFromTransactions(transactions);
+  const emergencyFundMonths = calcEmergencyFundMonthsFromTransactions(accounts, transactions);
+  const debtToIncomeRatio = calcDebtToIncomeRatioFromTransactions(accounts, transactions);
   const debtToAssetRatio = calcDebtToAssetRatio(accounts);
   const mortgageEquity = calcMortgageEquity(accounts);
   const totalAssets = calcTotalAssets(accounts);
 
-  console.log('[Dashboard] Rendering with', accounts.length, 'accounts and', cashflows.length, 'cashflows');
+  console.log('[Dashboard] Rendering with', accounts.length, 'accounts and', transactions.length, 'transactions');
 
   return (
     <div>
@@ -163,7 +163,7 @@ export const Dashboard = () => {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <AssetMixChart accounts={accounts} />
-        <CashflowGauge cashflows={cashflows} />
+        <CashflowGauge transactions={transactions} />
       </div>
     </div>
   );

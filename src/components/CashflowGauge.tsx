@@ -1,16 +1,20 @@
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { calcMonthlyCashflow, calcSavingsRate, calcMonthlyIncome } from '../utils/calculations';
-import type { Cashflow } from '../types/models';
+import { 
+  calcMonthlyCashflowFromTransactions, 
+  calcSavingsRateFromTransactions, 
+  calcMonthlyIncomeFromTransactions 
+} from '../utils/calculations';
+import type { Transaction } from '../types/models';
 
 interface CashflowGaugeProps {
-  cashflows: Cashflow[];
+  transactions: Transaction[];
 }
 
-export const CashflowGauge = ({ cashflows }: CashflowGaugeProps) => {
-  console.log('[CashflowGauge] Rendering with cashflows:', cashflows.length);
-  const monthlyCashflow = calcMonthlyCashflow(cashflows);
-  const savingsRate = calcSavingsRate(cashflows);
-  const monthlyIncome = calcMonthlyIncome(cashflows);
+export const CashflowGauge = ({ transactions }: CashflowGaugeProps) => {
+  console.log('[CashflowGauge] Rendering with transactions:', transactions.length);
+  const monthlyCashflow = calcMonthlyCashflowFromTransactions(transactions);
+  const savingsRate = calcSavingsRateFromTransactions(transactions);
+  const monthlyIncome = calcMonthlyIncomeFromTransactions(transactions);
 
   // For the gauge, we show savings rate as a percentage
   // The donut shows the savings rate (0-100%)
