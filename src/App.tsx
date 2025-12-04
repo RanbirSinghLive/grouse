@@ -4,6 +4,7 @@ import { useHouseholdStore } from './store/useHouseholdStore';
 import { Dashboard } from './pages/Dashboard';
 import { Accounts } from './pages/Accounts';
 import { Budget } from './pages/Budget';
+import { Projections } from './pages/Projections';
 import { Settings } from './pages/Settings';
 
 const Navigation = () => {
@@ -50,6 +51,16 @@ const Navigation = () => {
               Budget
             </Link>
             <Link
+              to="/projections"
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                location.pathname === '/projections'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              Projections
+            </Link>
+            <Link
               to="/settings"
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 location.pathname === '/settings'
@@ -83,6 +94,7 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/budget" element={<Budget />} />
+            <Route path="/projections" element={<Projections />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>

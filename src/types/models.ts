@@ -117,3 +117,143 @@ export const isMortgage = (accountType: Account['type']): boolean => {
   return accountType === 'mortgage';
 };
 
+// Projection types for v0.2
+export type LifeEvent = {
+  id: string;
+  year: number; // Year into projection (0 = current year)
+  month?: number; // Optional month (1-12)
+  type: 'income_change' | 'expense_change' | 'one_time_expense' | 'one_time_income' | 'account_change';
+  description: string;
+  amount: number; // Positive for income, negative for expense
+  recurring?: boolean; // If true, applies monthly going forward
+  accountId?: string; // If account balance changes
+};
+
+export type ProjectionAssumptions = {
+  // Investment returns
+  investmentReturnRate: number; // e.g., 0.06 (6% annual)
+  inflationRate: number; // e.g., 0.02 (2% annual)
+  salaryGrowthRate: number; // e.g., 0.03 (3% annual)
+  
+  // Tax assumptions (simplified)
+  marginalTaxRate: number; // e.g., 0.30 (30%)
+  rrspDeductionBenefit: number; // Tax savings from RRSP contributions
+  
+  // Retirement (optional)
+  targetRetirementAge?: number;
+  retirementExpenseRatio?: number; // e.g., 0.70 (70% of current expenses)
+  withdrawalRate?: number; // e.g., 0.04 (4% rule)
+};
+
+export type ProjectionConfig = {
+  projectionYears: number; // 1-30 years
+  startDate: string; // YYYY-MM-DD
+  monthlySteps: boolean; // Monthly vs annual granularity
+  
+  // For mortgage vs invest
+  monthlySurplus?: number;
+  prepaymentAmount?: number;
+  
+  // For major purchase
+  purchaseAmount?: number;
+  downPayment?: number;
+  financingRate?: number;
+  financingTerm?: number; // months
+};
+
+export type ProjectionScenario = {
+  id: string;
+  householdId: string;
+  name: string; // e.g., "Base Case", "Aggressive Investing", "Early Retirement"
+  type: 'net_worth' | 'mortgage_vs_invest' | 'retirement' | 'major_purchase';
+  createdAt: string;
+  updatedAt: string;
+  assumptions: ProjectionAssumptions;
+  config: ProjectionConfig;
+  lifeEvents?: LifeEvent[];
+};
+
+export type ProjectionMonth = {
+  year: number;
+  month: number; // 1-12
+  date: string; // YYYY-MM-DD
+  
+  // Assets
+  totalAssets: number;
+  cashAssets: number;
+  investmentAssets: number;
+  realEstateAssets: number;
+  
+  // Liabilities
+  totalLiabilities: number;
+  mortgageBalance: number;
+  otherDebt: number;
+  
+  // Net worth
+  netWorth: number;
+  netWorthChange: number; // Change from previous month
+  
+  // Cashflow
+  income: number;
+  expenses: number;
+  savings: number;
+  savingsRate: number;
+  
+  // Investment growth
+  investmentGrowth: number;
+  investmentContributions: number;
+  
+  // Debt payments
+  debtPayments: number;
+  principalPaydown: number;
+  interestPaid: number;
+};
+
+export type ProjectionYear = {
+  year: number;
+  // Aggregated yearly data
+  startingNetWorth: number;
+  endingNetWorth: number;
+  netWorthChange: number;
+  totalIncome: number;
+  totalExpenses: number;
+  totalSavings: number;
+  averageSavingsRate: number;
+  investmentGrowth: number;
+  debtPaydown: number;
+};
+
+export type ProjectionSummary = {
+  startingNetWorth: number;
+  endingNetWorth: number;
+  totalGrowth: number;
+  averageAnnualGrowth: number;
+  peakNetWorth: number;
+  peakNetWorthYear: number;
+  debtFreeDate?: string; // If applicable
+  retirementReadyDate?: string; // If applicable
+};
+
+export type MortgageVsInvestComparison = {
+  mortgagePayoffDate: string;
+  investPayoffDate: string;
+  netWorthDifference: number;
+  recommendation: 'mortgage' | 'invest' | 'hybrid';
+  reasoning: string;
+};
+
+export type ProjectionResult = {
+  scenarioId: string;
+  calculatedAt: string;
+  
+  // Time series data
+  monthlyData: ProjectionMonth[];
+  yearlyData: ProjectionYear[];
+  
+  // Summary metrics
+  summary: ProjectionSummary;
+  
+  // For mortgage vs invest
+  comparison?: MortgageVsInvestComparison;
+};
+

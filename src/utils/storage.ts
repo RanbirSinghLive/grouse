@@ -1,7 +1,8 @@
-import type { AppData, ImportData } from '../types/models';
+import type { AppData, ImportData, ProjectionScenario } from '../types/models';
 
 const STORAGE_KEY = 'grouse-app-data';
 const IMPORT_STORAGE_KEY = 'grouse-import-data';
+const PROJECTION_STORAGE_KEY = 'grouse-projection-data';
 
 export const saveData = (data: AppData): void => {
   console.log('[storage] saveData: saving data to localStorage');
@@ -90,6 +91,35 @@ export const loadImportData = (): ImportData | null => {
     return data;
   } catch (error) {
     console.error('[storage] loadImportData: error loading import data', error);
+    return null;
+  }
+};
+
+// Projection data storage functions
+export const saveProjectionData = (scenarios: ProjectionScenario[]): void => {
+  console.log('[storage] saveProjectionData: saving projection data to localStorage');
+  try {
+    localStorage.setItem(PROJECTION_STORAGE_KEY, JSON.stringify(scenarios));
+    console.log('[storage] saveProjectionData: projection data saved successfully');
+  } catch (error) {
+    console.error('[storage] saveProjectionData: error saving projection data', error);
+    throw new Error('Failed to save projection data to localStorage');
+  }
+};
+
+export const loadProjectionData = (): ProjectionScenario[] | null => {
+  console.log('[storage] loadProjectionData: loading projection data from localStorage');
+  try {
+    const stored = localStorage.getItem(PROJECTION_STORAGE_KEY);
+    if (!stored) {
+      console.log('[storage] loadProjectionData: no projection data found in localStorage');
+      return null;
+    }
+    const data = JSON.parse(stored) as ProjectionScenario[];
+    console.log('[storage] loadProjectionData: projection data loaded successfully', data);
+    return data;
+  } catch (error) {
+    console.error('[storage] loadProjectionData: error loading projection data', error);
     return null;
   }
 };

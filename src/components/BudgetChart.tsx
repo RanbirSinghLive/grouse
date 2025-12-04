@@ -99,7 +99,6 @@ export const BudgetChart = ({ transactions = [], selectedMonth }: BudgetChartPro
               
               if (trend !== undefined && !useSpecificMonth) {
                 const trendIcon = trendDir === 'up' ? '📈' : trendDir === 'down' ? '📉' : '➡️';
-                const trendColor = trendDir === 'up' ? '#10b981' : trendDir === 'down' ? '#ef4444' : '#6b7280';
                 tooltipContent.push(
                   `${trendIcon} ${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`
                 );

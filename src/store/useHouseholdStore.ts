@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { Household, Account, Cashflow, AppData, Holding, Transaction, TransactionPattern, ImportData } from '../types/models';
-import { loadData, saveData, loadImportData, saveImportData } from '../utils/storage';
+import type { Household, Account, Cashflow, AppData, Holding, Transaction, TransactionPattern, ImportData, ProjectionScenario } from '../types/models';
+import { loadData, saveData, loadImportData, saveImportData, loadProjectionData, saveProjectionData } from '../utils/storage';
 import { fetchPrices } from '../utils/stockApi';
 
 interface HouseholdStore {
@@ -13,6 +13,8 @@ interface HouseholdStore {
   // Import state
   transactions: Transaction[];
   patterns: TransactionPattern[];
+  // Projection state
+  projectionScenarios: ProjectionScenario[];
 
   // Actions
   initialize: () => void;
@@ -40,6 +42,11 @@ interface HouseholdStore {
   deletePattern: (id: string) => void;
   persistImportData: () => void;
   renameCategory: (oldName: string, newName: string) => void;
+  // Projection actions
+  addProjectionScenario: (scenario: Omit<ProjectionScenario, 'id' | 'createdAt' | 'updatedAt' | 'householdId'>) => void;
+  updateProjectionScenario: (id: string, updates: Partial<ProjectionScenario>) => void;
+  deleteProjectionScenario: (id: string) => void;
+  persistProjectionData: () => void;
   reset: () => void;
 }
 
@@ -77,6 +84,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     console.log('[store] initialize: loading data from storage');
     const data = loadData();
     const importData = loadImportData();
+    const projectionData = loadProjectionData();
     
     if (data) {
       set({
@@ -87,6 +95,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         editingCashflowId: null,
         transactions: importData?.transactions || [],
         patterns: importData?.patterns || [],
+        projectionScenarios: projectionData || [],
       });
       console.log('[store] initialize: data loaded', data);
     } else {
@@ -103,6 +112,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         editingCashflowId: null,
         transactions: importData?.transactions || [],
         patterns: importData?.patterns || [],
+        projectionScenarios: projectionData || [],
       });
       console.log('[store] initialize: created default household');
       persist();
@@ -118,6 +128,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     editingCashflowId: null,
     transactions: [],
     patterns: [],
+    projectionScenarios: [],
 
     // Initialize
     initialize,
@@ -433,6 +444,53 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
 
     persistImportData,
 
+    // Projection actions
+    persistProjectionData: () => {
+      const state = get();
+      saveProjectionData(state.projectionScenarios);
+      console.log('[store] persistProjectionData: projection data saved to storage');
+    },
+
+    addProjectionScenario: (scenarioData) => {
+      console.log('[store] addProjectionScenario:', scenarioData);
+      const household = get().household;
+      if (!household) {
+        console.error('[store] addProjectionScenario: no household set');
+        return;
+      }
+      const newScenario: ProjectionScenario = {
+        ...scenarioData,
+        id: generateId(),
+        householdId: household.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      set((state) => ({
+        projectionScenarios: [...state.projectionScenarios, newScenario],
+      }));
+      get().persistProjectionData();
+    },
+
+    updateProjectionScenario: (id, updates) => {
+      console.log('[store] updateProjectionScenario:', id, updates);
+      set((state) => ({
+        projectionScenarios: state.projectionScenarios.map((scenario) =>
+          scenario.id === id
+            ? { ...scenario, ...updates, updatedAt: new Date().toISOString() }
+            : scenario
+        ),
+      }));
+      get().persistProjectionData();
+    },
+
+    deleteProjectionScenario: (id) => {
+      console.log('[store] deleteProjectionScenario:', id);
+      set((state) => ({
+        projectionScenarios: state.projectionScenarios.filter((s) => s.id !== id),
+      }));
+      get().persistProjectionData();
+    },
+
     // Rename category across all transactions, patterns, and cashflows
     renameCategory: (oldName, newName) => {
       console.log('[store] renameCategory:', oldName, '->', newName);
@@ -479,9 +537,11 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         editingCashflowId: null,
         transactions: [],
         patterns: [],
+        projectionScenarios: [],
       });
       persist();
       persistImportData();
+      saveProjectionData([]);
     },
   };
 });

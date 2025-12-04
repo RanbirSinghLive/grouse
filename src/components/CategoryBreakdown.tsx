@@ -32,7 +32,6 @@ export const CategoryBreakdown = ({ transactions }: CategoryBreakdownProps) => {
           dataKey="value"
           aspectRatio={4/3}
           stroke="#fff"
-          strokeWidth={2}
         >
           <Tooltip
             formatter={(value: number, name: string, props: any) => {
