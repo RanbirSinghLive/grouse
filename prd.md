@@ -34,24 +34,40 @@ Users can input assets, liabilities, incomes, and expenses; view interactive cha
 Users can add and manage:
 - **Assets** (cash, investments, property)
 - **Liabilities** (mortgage, loans, credit cards)
-- **Monthly Incomes** (salary, rental, dividends)
-- **Monthly Expenses** (housing, childcare, groceries)
+- **Transactions** (imported via CSV or manually entered)
+  - Supports income, expense, transfer, and unclassified types
+  - Automatic categorization via pattern learning
+  - Duplicate detection
+- **Cashflows** (legacy - optional recurring budget items)
 
 Each entry supports:
 - `name`, `type`, `amount`, `frequency`, `account linkage`, and optional metadata.
+- Transactions include: `date`, `description`, `amount`, `category`, `owner`, `type`.
 
 ### B. Calculations
 - **Net Worth:** Assets − Liabilities  
-- **Monthly Cashflow:** Income − Expenses  
+- **Monthly Cashflow:** Average Income − Average Expenses (from transactions)  
 - **Savings Rate:** Surplus ÷ Income  
+- **Category Averages:** Average monthly spending by category (calculated from all transaction data)
+- **Trend Analysis:** Percentage change over time (comparing first half vs second half of data period)
+- **Emergency Fund Coverage:** Liquid assets ÷ Average monthly expenses
+- **Debt-to-Income Ratio:** Monthly debt payments ÷ Average monthly income
+- **Debt-to-Asset Ratio:** Total liabilities ÷ Total assets  
 
 ### C. Charts and Visualizations
 
 | Chart | Description | Library |
 |-------|-------------|---------|
 | **Asset Mix Breakdown** | Pie/Donut showing % by category (grouped: Cash & Cash-like, Registered Investments, Non-Registered Investments, Real Estate, Other Assets) | `Recharts` |
-| **Monthly Budget Flow** | Bar chart comparing incomes vs expenses by category | `Recharts` |
+| **Average Monthly Budget Flow** | Bar chart showing average monthly income/expense by category with trend indicators (📈 up, 📉 down, ➡️ stable) | `Recharts` |
+| **Monthly Budget Flow** | Bar chart showing specific month's income/expense totals by category | `Recharts` |
 | **Cashflow Gauge** | Donut gauge with savings rate ring, showing +/- $X/month in center, color-coded (emerald for surplus, red/orange for deficit) | `Recharts` |
+
+**Budget Calculation Methodology:**
+- Averages are calculated from actual transaction data
+- Each category's average = Total spending in category ÷ Total months with any transaction data
+- This provides realistic monthly budget expectations even for irregular expenses
+- Trend analysis compares first half vs second half of available data period
 
 Each chart auto-updates when the data store changes.
 
@@ -105,7 +121,26 @@ type Account = {
 };
 ```
 
-### Cashflows (incomes/expenses)
+### Transactions (primary data source for budget)
+```ts
+type Transaction = {
+  id: string;
+  householdId: string;
+  date: string; // YYYY-MM-DD
+  description: string;
+  amount: number; // Always positive
+  isDebit: boolean; // True for expense, false for income/credit
+  rawData: Record<string, string>; // Original CSV row data
+  type: 'income' | 'expense' | 'transfer' | 'unclassified'; // User-classified type
+  category?: string;
+  owner?: string;
+  fingerprint: string; // For duplicate detection
+  importedAt: string; // When it was imported
+  sourceFile?: string; // Original CSV file name
+};
+```
+
+### Cashflows (legacy - optional recurring budget items)
 ```ts
 type Cashflow = {
   id: string;
@@ -126,6 +161,49 @@ type Cashflow = {
 
 ## 5. 🧮 Calculations (Core Functions)
 
+### Transaction-Based Calculations (Primary)
+```ts
+// Calculate average monthly amount by category and type from transactions
+const calculateCategoryAverages = (transactions: Transaction[]): CategoryAverage[] => {
+  // Groups transactions by category and type
+  // Calculates monthly totals for each month with data
+  // Averages = Total spending ÷ Total months with ANY transaction data
+  // Includes trend analysis (first half vs second half comparison)
+};
+
+// Calculate monthly totals for a specific month
+const calculateMonthlyTotals = (transactions: Transaction[], month: string): Record<string, { amount: number; type: 'income' | 'expense' }> => {
+  // Filters transactions by month and groups by category
+  // Sums all transactions in each category for that month
+};
+
+// Calculate average monthly income from transactions
+const calcMonthlyIncomeFromTransactions = (transactions: Transaction[]): number => {
+  const averages = calculateCategoryAverages(transactions);
+  return averages.filter(avg => avg.type === 'income')
+                 .reduce((sum, avg) => sum + avg.averageAmount, 0);
+};
+
+// Calculate average monthly expenses from transactions
+const calcMonthlyExpensesFromTransactions = (transactions: Transaction[]): number => {
+  const averages = calculateCategoryAverages(transactions);
+  return averages.filter(avg => avg.type === 'expense')
+                 .reduce((sum, avg) => sum + avg.averageAmount, 0);
+};
+
+// Calculate average monthly cashflow from transactions
+const calcMonthlyCashflowFromTransactions = (transactions: Transaction[]): number =>
+  calcMonthlyIncomeFromTransactions(transactions) - calcMonthlyExpensesFromTransactions(transactions);
+
+// Calculate savings rate from transactions
+const calcSavingsRateFromTransactions = (transactions: Transaction[]): number => {
+  const income = calcMonthlyIncomeFromTransactions(transactions);
+  if (income === 0) return 0;
+  return (calcMonthlyCashflowFromTransactions(transactions) / income) * 100;
+};
+```
+
+### Legacy Cashflow Calculations (Optional)
 ```ts
 // Normalize any frequency to monthly amount
 const normalizeMonthly = (amount: number, frequency: Cashflow['frequency']): number => {
@@ -137,32 +215,14 @@ const normalizeMonthly = (amount: number, frequency: Cashflow['frequency']): num
     default: return amount;
   }
 };
+```
 
+### Account-Based Calculations
+```ts
 // Calculate net worth from accounts
 const calcNetWorth = (accounts: Account[]): number =>
   accounts.filter(a => a.kind === 'asset').reduce((sum, a) => sum + a.balance, 0) -
   accounts.filter(a => a.kind === 'liability').reduce((sum, a) => sum + a.balance, 0);
-
-// Calculate total monthly income
-const calcMonthlyIncome = (flows: Cashflow[]): number =>
-  flows.filter(f => f.type === 'income')
-       .reduce((sum, f) => sum + normalizeMonthly(f.amount, f.frequency), 0);
-
-// Calculate total monthly expenses
-const calcMonthlyExpenses = (flows: Cashflow[]): number =>
-  flows.filter(f => f.type === 'expense')
-       .reduce((sum, f) => sum + normalizeMonthly(f.amount, f.frequency), 0);
-
-// Calculate monthly cashflow
-const calcMonthlyCashflow = (flows: Cashflow[]): number =>
-  calcMonthlyIncome(flows) - calcMonthlyExpenses(flows);
-
-// Calculate savings rate
-const calcSavingsRate = (flows: Cashflow[]): number => {
-  const income = calcMonthlyIncome(flows);
-  if (income === 0) return 0;
-  return (calcMonthlyCashflow(flows) / income) * 100;
-};
 ```
 
 ---
@@ -251,12 +311,109 @@ For Asset Mix Breakdown chart, group accounts into 5 categories:
 
 ---
 
-## 11. 🧪 Testing & Validation
+## 13. 🧪 Testing & Validation
 
 - Snapshot tests for calculations.
 - Chart rendering smoke tests.
 - LocalStorage persistence verification.
 - Manual UX test flow:
-  1. Add one income + one expense + one asset + one liability.
-  2. Reload browser → values persist.
-  3. Dashboard and charts reflect updated totals.
+  1. Import CSV transactions or add manually.
+  2. Verify category averages calculate correctly.
+  3. Check trend indicators show up/down/stable correctly.
+  4. Add one asset + one liability.
+  5. Reload browser → values persist.
+  6. Dashboard and charts reflect updated totals.
+
+## 14. 📊 Suggested Additional Data Visualizations
+
+### High Priority
+1. **Spending Over Time (Line Chart)**
+   - Monthly spending trends for selected categories
+   - Compare multiple categories on same chart
+   - Show income vs expenses over time
+   - Helps identify seasonal patterns
+
+2. **Category Breakdown (Treemap or Sunburst)**
+   - Visual hierarchy of spending categories
+   - Size = amount, color = trend direction
+   - Interactive drill-down into subcategories
+   - Better for understanding spending distribution
+
+3. **Monthly Comparison (Grouped Bar Chart)**
+   - Side-by-side comparison of multiple months
+   - Compare current month vs previous months
+   - Year-over-year comparison
+   - Useful for tracking progress
+
+4. **Spending Heatmap (Calendar View)**
+   - Daily spending intensity visualization
+   - Color intensity = spending amount
+   - Identify high-spending days/weeks
+   - Pattern recognition for budgeting
+
+### Medium Priority
+5. **Income vs Expenses Timeline (Area Chart)**
+   - Stacked area showing income (green) and expenses (red)
+   - Net cashflow as difference between areas
+   - Visual representation of savings/deficit periods
+   - Time range selector (3/6/12 months, all time)
+
+6. **Top Categories Comparison (Horizontal Bar Chart)**
+   - Top 10 income and expense categories
+   - Percentage of total for each
+   - Quick reference for biggest budget items
+   - Sortable by amount or percentage
+
+7. **Spending Velocity (Scatter Plot)**
+   - X-axis: Days into month, Y-axis: Cumulative spending
+   - Multiple lines for different months
+   - Identify spending patterns (front-loaded vs back-loaded)
+   - Budget burn rate visualization
+
+8. **Category Trends (Multi-Line Chart)**
+   - Multiple categories on same chart
+   - Show trend lines for selected categories
+   - Compare growth/decline rates
+   - Useful for tracking specific budget goals
+
+### Lower Priority (Future Enhancements)
+9. **Forecast Projection (Line Chart with Projection)**
+   - Historical data + projected future spending
+   - Based on trends and averages
+   - Confidence intervals
+   - "If current trends continue..." visualization
+
+10. **Budget Variance Analysis (Bar Chart)**
+    - Planned vs actual spending
+    - Variance percentage for each category
+    - Color-coded (green = under budget, red = over budget)
+    - Requires budget targets feature
+
+11. **Spending Distribution (Histogram)**
+    - Distribution of transaction amounts
+    - Identify typical transaction size
+    - Outlier detection
+    - Useful for understanding spending behavior
+
+12. **Category Correlation Matrix (Heatmap)**
+    - Show relationships between spending categories
+    - When one category increases, which others change?
+    - Data-driven insights for budget optimization
+    - Advanced analytics feature
+
+13. **Geographic Spending (Map Visualization)**
+    - If location data available from transactions
+    - Show spending by location
+    - Identify high-spending areas
+    - Useful for travel/commute analysis
+
+14. **Recurring vs One-Time (Pie Chart)**
+    - Breakdown of recurring expenses vs one-time purchases
+    - Helps identify areas for cost reduction
+    - Understanding fixed vs variable costs
+
+15. **Savings Goal Progress (Gauge/Progress Bar)**
+    - Multiple savings goals with progress tracking
+    - Visual progress indicators
+    - Time to goal estimates
+    - Motivational visualization

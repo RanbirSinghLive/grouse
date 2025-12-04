@@ -366,6 +366,172 @@ export const calculateTrendPercentage = (
 };
 
 // ============================================================================
+// Chart Data Preparation Functions
+// ============================================================================
+
+// Prepare data for Spending Over Time line chart
+export type MonthlySpendingData = {
+  month: string;
+  monthDisplay: string;
+  income: number;
+  expenses: number;
+  netCashflow: number;
+  [category: string]: string | number; // Dynamic category fields
+};
+
+export const prepareSpendingOverTimeData = (
+  transactions: Transaction[],
+  selectedCategories?: string[]
+): MonthlySpendingData[] => {
+  console.log('[calculations] prepareSpendingOverTimeData: processing', transactions.length, 'transactions');
+  const availableMonths = getAvailableMonths(transactions);
+  
+  if (availableMonths.length === 0) return [];
+  
+  // Get all categories if none selected
+  const allCategories = selectedCategories || 
+    [...new Set(transactions.filter(tx => tx.category).map(tx => tx.category!))];
+  
+  const data: MonthlySpendingData[] = availableMonths.map(month => {
+    const monthlyTotals = calculateMonthlyTotals(transactions, month);
+    
+    // Format month for display
+    const [year, monthNum] = month.split('-');
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthDisplay = `${monthNames[parseInt(monthNum) - 1]} ${year}`;
+    
+    let income = 0;
+    let expenses = 0;
+    const categoryData: Record<string, number> = {};
+    
+    // Calculate totals and category breakdowns
+    Object.entries(monthlyTotals).forEach(([category, { amount, type }]) => {
+      if (type === 'income') {
+        income += amount;
+      } else {
+        expenses += amount;
+      }
+      
+      // Add category data if selected
+      if (allCategories.includes(category)) {
+        categoryData[category] = (categoryData[category] || 0) + amount;
+      }
+    });
+    
+    const result: MonthlySpendingData = {
+      month,
+      monthDisplay,
+      income,
+      expenses,
+      netCashflow: income - expenses,
+      ...categoryData,
+    };
+    
+    return result;
+  });
+  
+  console.log('[calculations] prepareSpendingOverTimeData: result', data);
+  return data;
+};
+
+// Prepare data for Monthly Comparison grouped bar chart
+export type MonthlyComparisonData = {
+  category: string;
+  type: 'income' | 'expense';
+  [month: string]: string | number; // Dynamic month fields
+};
+
+export const prepareMonthlyComparisonData = (
+  transactions: Transaction[],
+  monthsToCompare: string[]
+): MonthlyComparisonData[] => {
+  console.log('[calculations] prepareMonthlyComparisonData: comparing', monthsToCompare.length, 'months');
+  
+  if (monthsToCompare.length === 0) return [];
+  
+  // Get all categories from selected months
+  const categorySet = new Set<string>();
+  monthsToCompare.forEach(month => {
+    const monthlyTotals = calculateMonthlyTotals(transactions, month);
+    Object.keys(monthlyTotals).forEach(category => categorySet.add(category));
+  });
+  
+  const categories = Array.from(categorySet);
+  const data: MonthlyComparisonData[] = [];
+  
+  categories.forEach(category => {
+    // Get type from first month that has this category
+    let categoryType: 'income' | 'expense' = 'expense';
+    for (const month of monthsToCompare) {
+      const monthlyTotals = calculateMonthlyTotals(transactions, month);
+      if (monthlyTotals[category]) {
+        categoryType = monthlyTotals[category].type;
+        break;
+      }
+    }
+    
+    const categoryData: MonthlyComparisonData = {
+      category,
+      type: categoryType,
+    };
+    
+    // Add amount for each month (0 if no data)
+    monthsToCompare.forEach(month => {
+      const monthlyTotals = calculateMonthlyTotals(transactions, month);
+      categoryData[month] = monthlyTotals[category]?.amount || 0;
+    });
+    
+    data.push(categoryData);
+  });
+  
+  // Sort by total amount across all months (descending)
+  data.sort((a, b) => {
+    const totalA = monthsToCompare.reduce((sum, month) => sum + (a[month] as number || 0), 0);
+    const totalB = monthsToCompare.reduce((sum, month) => sum + (b[month] as number || 0), 0);
+    return totalB - totalA;
+  });
+  
+  console.log('[calculations] prepareMonthlyComparisonData: result', data);
+  return data;
+};
+
+// Prepare data for Category Breakdown treemap
+export type CategoryBreakdownData = {
+  name: string;
+  value: number;
+  type: 'income' | 'expense';
+  fill: string;
+};
+
+export const prepareCategoryBreakdownData = (
+  transactions: Transaction[]
+): CategoryBreakdownData[] => {
+  console.log('[calculations] prepareCategoryBreakdownData: processing', transactions.length, 'transactions');
+  
+  const averages = calculateCategoryAverages(transactions);
+  
+  // Color scheme: green for income, red shades for expenses
+  const incomeColors = ['#10b981', '#059669', '#047857', '#065f46'];
+  const expenseColors = ['#ef4444', '#dc2626', '#b91c1c', '#991b1b', '#7f1d1d'];
+  
+  const data: CategoryBreakdownData[] = averages.map((avg, index) => {
+    const colorPalette = avg.type === 'income' ? incomeColors : expenseColors;
+    const colorIndex = index % colorPalette.length;
+    
+    return {
+      name: avg.category,
+      value: avg.averageAmount,
+      type: avg.type,
+      fill: colorPalette[colorIndex],
+    };
+  });
+  
+  console.log('[calculations] prepareCategoryBreakdownData: result', data);
+  return data;
+};
+
+// ============================================================================
 // Transaction-based Cash Flow Calculations (for Dashboard)
 // ============================================================================
 

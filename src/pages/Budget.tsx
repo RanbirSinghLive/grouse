@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { BudgetChart } from '../components/BudgetChart';
+import { SpendingOverTime } from '../components/SpendingOverTime';
+import { CategoryBreakdown } from '../components/CategoryBreakdown';
+import { MonthlyComparison } from '../components/MonthlyComparison';
 import { CSVUpload } from '../components/CSVUpload';
 import { TransactionReview } from '../components/TransactionReview';
 import { calculateCategoryAverages, getAvailableMonths } from '../utils/calculations';
@@ -18,11 +21,17 @@ export const Budget = () => {
     updateTransaction,
     addPattern,
     updatePattern,
+    renameCategory,
   } = useHouseholdStore();
   const [filterOwner, setFilterOwner] = useState<string>('');
   const [importedTransactions, setImportedTransactions] = useState<Transaction[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [viewMode, setViewMode] = useState<'averages' | 'month'>('averages');
+  // Inline editing state
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryValue, setEditingCategoryValue] = useState<string>('');
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editingTransactionData, setEditingTransactionData] = useState<Partial<Transaction>>({});
 
 
   // Set default month to current month when switching to month view
@@ -227,6 +236,38 @@ export const Budget = () => {
     return [...new Set(existingTransactions.map(tx => tx.category).filter((cat): cat is string => Boolean(cat)))];
   }, [existingTransactions]);
 
+  // Handle category rename in averages view
+  const handleCategoryRename = (oldCategory: string, newCategory: string) => {
+    if (!newCategory || newCategory.trim() === '' || newCategory === oldCategory) {
+      setEditingCategory(null);
+      return;
+    }
+    renameCategory(oldCategory, newCategory.trim());
+    setEditingCategory(null);
+  };
+
+  // Handle transaction edit in month view
+  const handleTransactionEdit = (tx: Transaction) => {
+    setEditingTransactionId(tx.id);
+    setEditingTransactionData({
+      category: tx.category || '',
+      type: tx.type,
+      amount: tx.amount,
+      description: tx.description,
+    });
+  };
+
+  const handleTransactionSave = (txId: string) => {
+    updateTransaction(txId, editingTransactionData);
+    setEditingTransactionId(null);
+    setEditingTransactionData({});
+  };
+
+  const handleTransactionCancel = () => {
+    setEditingTransactionId(null);
+    setEditingTransactionData({});
+  };
+
 
   return (
     <div>
@@ -348,6 +389,17 @@ export const Budget = () => {
         />
       </div>
 
+      {/* Additional Visualizations */}
+      {viewMode === 'averages' && existingTransactions.length > 0 && (
+        <div className="space-y-6 mb-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <SpendingOverTime transactions={existingTransactions} />
+            <CategoryBreakdown transactions={existingTransactions} />
+          </div>
+          <MonthlyComparison transactions={existingTransactions} />
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 overflow-hidden">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50/50">
@@ -454,7 +506,35 @@ export const Budget = () => {
                         {avg.type}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{avg.category}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                      {editingCategory === `${avg.category}-${avg.type}` ? (
+                        <input
+                          type="text"
+                          value={editingCategoryValue}
+                          onChange={(e) => setEditingCategoryValue(e.target.value)}
+                          onBlur={() => handleCategoryRename(avg.category, editingCategoryValue)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleCategoryRename(avg.category, editingCategoryValue);
+                            } else if (e.key === 'Escape') {
+                              setEditingCategory(null);
+                            }
+                          }}
+                          className="px-2 py-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          className="cursor-pointer hover:text-blue-600"
+                          onClick={() => {
+                            setEditingCategory(`${avg.category}-${avg.type}`);
+                            setEditingCategoryValue(avg.category);
+                          }}
+                        >
+                          {avg.category}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                       ${avg.averageAmount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
@@ -471,6 +551,18 @@ export const Budget = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       {avg.transactionCount}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <button
+                        onClick={() => {
+                          setEditingCategory(`${avg.category}-${avg.type}`);
+                          setEditingCategoryValue(avg.category);
+                        }}
+                        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg font-semibold hover:bg-blue-200 transition-all text-xs"
+                        title="Edit Category"
+                      >
+                        ✏️ Edit
+                      </button>
                     </td>
                   </tr>
                 );
@@ -496,23 +588,72 @@ export const Budget = () => {
                   console.warn('[Budget] Transaction missing date:', tx.id, tx.description);
                 }
                 
+                const isEditing = editingTransactionId === tx.id;
+                
                 return (
                   <tr
                     key={tx.id}
                     className="hover:bg-blue-50/50 transition-colors"
                   >
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                        tx.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                      }`}>
-                        {tx.type}
-                      </span>
+                      {isEditing ? (
+                        <select
+                          value={editingTransactionData.type || tx.type}
+                          onChange={(e) => setEditingTransactionData({ ...editingTransactionData, type: e.target.value as Transaction['type'] })}
+                          className="px-2 py-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
+                        >
+                          <option value="income">income</option>
+                          <option value="expense">expense</option>
+                          <option value="transfer">transfer</option>
+                          <option value="unclassified">unclassified</option>
+                        </select>
+                      ) : (
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                          tx.type === 'income' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          {tx.type}
+                        </span>
+                      )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{tx.category || 'Uncategorized'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      ${tx.amount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={editingTransactionData.category || ''}
+                          onChange={(e) => setEditingTransactionData({ ...editingTransactionData, category: e.target.value })}
+                          placeholder="Category"
+                          className="px-2 py-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs w-32"
+                          list="category-list"
+                        />
+                      ) : (
+                        tx.category || 'Uncategorized'
+                      )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{tx.description}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editingTransactionData.amount || tx.amount}
+                          onChange={(e) => setEditingTransactionData({ ...editingTransactionData, amount: parseFloat(e.target.value) || 0 })}
+                          className="px-2 py-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs w-24"
+                        />
+                      ) : (
+                        `$${tx.amount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={editingTransactionData.description || tx.description}
+                          onChange={(e) => setEditingTransactionData({ ...editingTransactionData, description: e.target.value })}
+                          className="px-2 py-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs w-48"
+                        />
+                      ) : (
+                        tx.description
+                      )}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {dateDisplay}
                     </td>
@@ -520,35 +661,53 @@ export const Budget = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{tx.owner || 'All / Household'}</td>
                     )}
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <div className="flex gap-3">
-                        <button
-                          onClick={() => {
-                            updateTransaction(tx.id, { 
-                              type: tx.type === 'income' ? 'expense' : 'income' 
-                            });
-                          }}
-                          className="px-4 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-semibold hover:bg-emerald-200 transition-all text-xs"
-                        >
-                          ✏️ Edit
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (window.confirm('Are you sure you want to delete this transaction?')) {
-                              deleteTransaction(tx.id);
-                            }
-                          }}
-                          className="px-4 py-1.5 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-all text-xs"
-                        >
-                          🗑️ Delete
-                        </button>
-                      </div>
+                      {isEditing ? (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleTransactionSave(tx.id)}
+                            className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-semibold hover:bg-emerald-200 transition-all text-xs"
+                          >
+                            ✓ Save
+                          </button>
+                          <button
+                            onClick={handleTransactionCancel}
+                            className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 transition-all text-xs"
+                          >
+                            ✕ Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => handleTransactionEdit(tx)}
+                            className="px-4 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg font-semibold hover:bg-emerald-200 transition-all text-xs"
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Are you sure you want to delete this transaction?')) {
+                                deleteTransaction(tx.id);
+                              }
+                            }}
+                            className="px-4 py-1.5 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-all text-xs"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
               })
             )}
-          </tbody>
+            </tbody>
         </table>
+        <datalist id="category-list">
+          {existingCategories.map(cat => (
+            <option key={cat} value={cat} />
+          ))}
+        </datalist>
         {viewMode === 'averages' && filteredAverages.length === 0 && (
           <div className="p-12 text-center">
             <p className="text-gray-500 text-sm">
