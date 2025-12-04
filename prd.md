@@ -82,7 +82,8 @@ Each chart auto-updates when the data store changes.
 **Routes:**
 - `/` → Dashboard (key totals + charts)
 - `/accounts` → Accounts (Assets & Liabilities CRUD)
-- `/budget` → Budget (Incomes & Expenses CRUD + charts)
+- `/budget` → Budget (Transaction analysis, category averages, month-by-month view)
+- `/projections` → Projections (v0.2+) - Financial forecasting and scenario planning
 - `/settings` → Settings (household info, export/import, reset)
 
 **Form UX:**
@@ -245,11 +246,39 @@ const calcNetWorth = (accounts: Account[]): number =>
 
 | Future Feature | Description |
 |----------------|-------------|
-| Projection Engine | Deterministic and Monte Carlo projections |
-| Invest vs Prepay Tool | Compare mortgage prepayment vs investing |
-| Tax Insights | Approximate CPP/OAS and RRSP deduction effects |
-| Cloud Sync | Optional Supabase/Firebase backend |
-| Multi-scenario Management | Save multiple financial plans |
+| **Projection Engine** | Deterministic and Monte Carlo projections - See [PROJECTION_TAB_DESIGN.md](./PROJECTION_TAB_DESIGN.md) for detailed design |
+| **Invest vs Prepay Tool** | Compare mortgage prepayment vs investing with side-by-side analysis |
+| **Tax Insights** | Approximate CPP/OAS and RRSP deduction effects |
+| **Cloud Sync** | Optional Supabase/Firebase backend |
+| **Multi-scenario Management** | Save multiple financial plans and compare outcomes |
+
+### Projection Tab Overview (v0.2+)
+
+The Projection tab enables users to forecast their financial future. Key features:
+
+**Core Projection Types:**
+1. **Net Worth Projection** - Forecast net worth over 1-30 years based on current assets, liabilities, income, and expenses
+2. **Mortgage vs Invest Comparison** - Side-by-side analysis of paying down mortgage vs investing surplus
+3. **Retirement Projection** - Estimate retirement readiness with CPP/OAS considerations
+4. **Major Purchase Affordability** - Determine if a major purchase is financially feasible
+
+**Key Capabilities:**
+- Configurable assumptions (investment returns, inflation, salary growth)
+- Life events modeling (one-time expenses, income changes)
+- Multiple scenario comparison
+- Year-by-year breakdown tables
+- Interactive charts showing trajectories
+- Canadian-specific features (RRSP deductions, TFSA growth, CPP/OAS)
+
+**Implementation Phases:**
+- **Phase 1 (v0.2):** Basic net worth projection with fixed assumptions
+- **Phase 2 (v0.2.1):** User-configurable assumptions and scenario management
+- **Phase 3 (v0.2.2):** Mortgage vs Invest comparison tool
+- **Phase 4 (v0.2.3):** Life events modeling
+- **Phase 5 (v0.3):** Retirement-specific projections
+- **Phase 6 (v0.4):** Monte Carlo simulations with confidence intervals
+
+See [PROJECTION_TAB_DESIGN.md](./PROJECTION_TAB_DESIGN.md) for complete technical specifications, data models, calculation algorithms, and UI/UX designs.
 
 ---
 
