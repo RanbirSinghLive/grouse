@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Household, Account, Cashflow, AppData, Holding, Transaction, TransactionPattern, ImportData, ProjectionScenario } from '../types/models';
-import { loadData, saveData, loadImportData, saveImportData, loadProjectionData, saveProjectionData } from '../utils/storage';
+import { loadData, saveData, loadImportData, saveImportData, loadProjectionData, saveProjectionData, loadBudgetNote, saveBudgetNote } from '../utils/storage';
 import { fetchPrices } from '../utils/stockApi';
 
 interface HouseholdStore {
@@ -15,6 +15,8 @@ interface HouseholdStore {
   patterns: TransactionPattern[];
   // Projection state
   projectionScenarios: ProjectionScenario[];
+  // Budget note
+  budgetNote: string;
 
   // Actions
   initialize: () => void;
@@ -47,6 +49,8 @@ interface HouseholdStore {
   updateProjectionScenario: (id: string, updates: Partial<ProjectionScenario>) => void;
   deleteProjectionScenario: (id: string) => void;
   persistProjectionData: () => void;
+  // Budget note actions
+  setBudgetNote: (note: string) => void;
   reset: () => void;
 }
 
@@ -85,6 +89,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     const data = loadData();
     const importData = loadImportData();
     const projectionData = loadProjectionData();
+    const budgetNote = loadBudgetNote();
     
     if (data) {
       set({
@@ -96,6 +101,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         transactions: importData?.transactions || [],
         patterns: importData?.patterns || [],
         projectionScenarios: projectionData || [],
+        budgetNote: budgetNote || '',
       });
       console.log('[store] initialize: data loaded', data);
     } else {
@@ -113,6 +119,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         transactions: importData?.transactions || [],
         patterns: importData?.patterns || [],
         projectionScenarios: projectionData || [],
+        budgetNote: budgetNote || '',
       });
       console.log('[store] initialize: created default household');
       persist();
@@ -129,6 +136,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     transactions: [],
     patterns: [],
     projectionScenarios: [],
+    budgetNote: '',
 
     // Initialize
     initialize,
@@ -522,6 +530,12 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       persistImportData();
     },
 
+    // Budget note actions
+    setBudgetNote: (note) => {
+      set({ budgetNote: note });
+      saveBudgetNote(note);
+    },
+
     // Reset
     reset: () => {
       console.log('[store] reset: clearing all data');
@@ -538,10 +552,12 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         transactions: [],
         patterns: [],
         projectionScenarios: [],
+        budgetNote: '',
       });
       persist();
       persistImportData();
       saveProjectionData([]);
+      saveBudgetNote('');
     },
   };
 });

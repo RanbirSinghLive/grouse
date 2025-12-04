@@ -146,7 +146,7 @@ export type ProjectionAssumptions = {
 };
 
 export type ProjectionConfig = {
-  projectionYears: number; // 1-30 years
+  projectionYears: number; // 1-60 years
   startDate: string; // YYYY-MM-DD
   monthlySteps: boolean; // Monthly vs annual granularity
   

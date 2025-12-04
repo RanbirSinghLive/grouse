@@ -6,6 +6,7 @@ import { CategoryBreakdown } from '../components/CategoryBreakdown';
 import { MonthlyComparison } from '../components/MonthlyComparison';
 import { CSVUpload } from '../components/CSVUpload';
 import { TransactionReview } from '../components/TransactionReview';
+import { DataCutoffNote } from '../components/DataCutoffNote';
 import { calculateCategoryAverages, getAvailableMonths } from '../utils/calculations';
 import { findDuplicates } from '../utils/duplicateDetector';
 import { learnFromClassification } from '../utils/patternLearner';
@@ -274,6 +275,9 @@ export const Budget = () => {
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Budget</h1>
       </div>
+
+      {/* Data Cut-off Note */}
+      <DataCutoffNote />
 
       {/* CSV Import Section - Always visible */}
       {importedTransactions.length === 0 ? (

@@ -124,3 +124,28 @@ export const loadProjectionData = (): ProjectionScenario[] | null => {
   }
 };
 
+// Budget note storage functions
+const BUDGET_NOTE_STORAGE_KEY = 'grouse-budget-note';
+
+export const saveBudgetNote = (note: string): void => {
+  try {
+    localStorage.setItem(BUDGET_NOTE_STORAGE_KEY, JSON.stringify(note));
+  } catch (error) {
+    console.error('[storage] saveBudgetNote: error saving budget note', error);
+    throw new Error('Failed to save budget note to localStorage');
+  }
+};
+
+export const loadBudgetNote = (): string | null => {
+  try {
+    const stored = localStorage.getItem(BUDGET_NOTE_STORAGE_KEY);
+    if (!stored) {
+      return null;
+    }
+    return JSON.parse(stored) as string;
+  } catch (error) {
+    console.error('[storage] loadBudgetNote: error loading budget note', error);
+    return null;
+  }
+};
+

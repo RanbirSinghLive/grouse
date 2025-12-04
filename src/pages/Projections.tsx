@@ -135,6 +135,13 @@ export const Projections = () => {
 
   const handleConfigChange = (key: keyof ProjectionScenario['config'], value: number | string | boolean) => {
     if (!editingScenario) return;
+    
+    // Validate projectionYears
+    if (key === 'projectionYears' && typeof value === 'number') {
+      if (value < 1) value = 1;
+      if (value > 60) value = 60;
+    }
+    
     setEditingScenario({
       ...editingScenario,
       config: {
@@ -238,6 +245,12 @@ export const Projections = () => {
                     <option value={20}>20 Years</option>
                     <option value={25}>25 Years</option>
                     <option value={30}>30 Years</option>
+                    <option value={35}>35 Years</option>
+                    <option value={40}>40 Years</option>
+                    <option value={45}>45 Years</option>
+                    <option value={50}>50 Years</option>
+                    <option value={55}>55 Years</option>
+                    <option value={60}>60 Years</option>
                   </select>
                 </div>
               </div>
