@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { exportData, importData, clearData } from '../utils/storage';
+import { getAllProvinces, getProvinceName, type Province } from '../utils/canadianTaxRates';
 
 export const Settings = () => {
   const { household, setHousehold, reset, cashflows, transactions, patterns, renameCategory } = useHouseholdStore();
   const [householdName, setHouseholdName] = useState(household?.name || '');
+  const [householdProvince, setHouseholdProvince] = useState<Province | ''>(household?.province || '');
   const [newOwner, setNewOwner] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
@@ -25,9 +27,10 @@ export const Settings = () => {
     return Array.from(categories).sort();
   }, [cashflows, transactions, patterns]);
 
-  // Update household name when household changes
+  // Update household name and province when household changes
   useEffect(() => {
     setHouseholdName(household?.name || '');
+    setHouseholdProvince(household?.province || '');
   }, [household]);
 
   const handleStartEditCategory = (category: string) => {
@@ -61,12 +64,13 @@ export const Settings = () => {
 
   const handleSaveHousehold = () => {
     if (!household) return;
-    console.log('[Settings] Saving household:', householdName);
+    console.log('[Settings] Saving household:', householdName, 'province:', householdProvince);
     setHousehold({
       ...household,
       name: householdName,
+      province: householdProvince || undefined,
     });
-    alert('Household name saved!');
+    alert('Household information saved!');
   };
 
   const handleAddOwner = () => {
@@ -157,13 +161,33 @@ export const Settings = () => {
               onChange={(e) => setHouseholdName(e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
             />
-            <button
-              onClick={handleSaveHousehold}
-              className="mt-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-blue-800 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
-            >
-              💾 Save Name
-            </button>
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Province/Territory (for tax calculations)
+            </label>
+            <select
+              value={householdProvince}
+              onChange={(e) => setHouseholdProvince(e.target.value as Province | '')}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+            >
+              <option value="">Select province...</option>
+              {getAllProvinces().map(province => (
+                <option key={province} value={province}>
+                  {getProvinceName(province)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Used for accurate tax calculations in projections
+            </p>
+          </div>
+          <button
+            onClick={handleSaveHousehold}
+            className="mt-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-blue-800 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
+          >
+            💾 Save Household Info
+          </button>
         </div>
       </div>
 

@@ -35,6 +35,7 @@ interface HouseholdStore {
   deleteHolding: (accountId: string, holdingId: string) => void;
   recalculateAccountBalance: (accountId: string) => void;
   refreshHoldingPrices: (accountId: string, onProgress?: (current: number, total: number, ticker: string) => void) => Promise<void>;
+  refreshAllHoldingPrices: (onProgress?: (current: number, total: number, ticker: string) => void) => Promise<void>;
   // Import actions
   addTransactions: (transactions: Transaction[]) => void;
   updateTransaction: (id: string, updates: Partial<Transaction>) => void;
@@ -393,6 +394,96 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         console.log('[store] Prices refreshed successfully');
       } catch (error) {
         console.error('[store] Error during price refresh:', error);
+        throw error; // Re-throw to be caught by UI
+      }
+    },
+
+    refreshAllHoldingPrices: async (onProgress) => {
+      console.log('[store] refreshAllHoldingPrices: Refreshing prices for all accounts');
+      const state = get();
+      
+      // Collect all unique tickers from all accounts with holdings
+      const tickerSet = new Set<string>();
+      const accountsWithHoldings = state.accounts.filter(
+        acc => acc.useHoldings && acc.holdings && acc.holdings.length > 0
+      );
+
+      if (accountsWithHoldings.length === 0) {
+        console.log('[store] No accounts with holdings to refresh');
+        return;
+      }
+
+      // Collect all unique tickers
+      accountsWithHoldings.forEach(account => {
+        account.holdings?.forEach(holding => {
+          if (holding.ticker && holding.ticker !== 'CASH') {
+            tickerSet.add(holding.ticker);
+          }
+        });
+      });
+
+      const uniqueTickers = Array.from(tickerSet);
+      console.log('[store] Fetching prices for', uniqueTickers.length, 'unique tickers:', uniqueTickers);
+
+      if (uniqueTickers.length === 0) {
+        console.log('[store] No tickers to refresh (only CASH holdings)');
+        return;
+      }
+
+      try {
+        const priceData = await fetchPrices(uniqueTickers, onProgress);
+        console.log('[store] Received price data for all holdings:', priceData);
+
+        const errors: string[] = [];
+
+        // Update all accounts with the fetched prices
+        set((state) => ({
+          accounts: state.accounts.map((acc) => {
+            if (acc.useHoldings && acc.holdings) {
+              const updatedHoldings = acc.holdings.map((holding) => {
+                const priceInfo = priceData.find(p => p.ticker === holding.ticker);
+                if (priceInfo) {
+                  if (priceInfo.error) {
+                    console.warn(`[store] Error fetching price for ${holding.ticker}:`, priceInfo.error);
+                    errors.push(`${holding.ticker}: ${priceInfo.error}`);
+                    return holding; // Keep existing price if API error
+                  }
+                  return {
+                    ...holding,
+                    currentPrice: priceInfo.price,
+                    lastPriceUpdate: priceInfo.lastUpdated,
+                  };
+                }
+                return holding;
+              });
+
+              const balance = updatedHoldings.reduce(
+                (sum, h) => sum + h.shares * h.currentPrice,
+                0
+              );
+
+              return {
+                ...acc,
+                holdings: updatedHoldings,
+                balance,
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            return acc;
+          }),
+        }));
+        persist();
+
+        // Throw error if any tickers failed
+        if (errors.length > 0) {
+          const errorMessage = `Some prices failed: ${errors.join('; ')}`;
+          console.warn('[store] Prices refreshed with errors:', errorMessage);
+          throw new Error(errorMessage);
+        }
+
+        console.log('[store] All prices refreshed successfully');
+      } catch (error) {
+        console.error('[store] Error during global price refresh:', error);
         throw error; // Re-throw to be caught by UI
       }
     },

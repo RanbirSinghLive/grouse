@@ -12,6 +12,13 @@ import type {
   MortgageVsInvestComparison,
 } from '../types/models';
 import { calcNetWorth, calcMonthlyIncomeFromTransactions, calcMonthlyExpensesFromTransactions } from './calculations';
+import {
+  getHoldingReturnRates,
+  calculateInvestmentReturn,
+  calculateAfterTaxReturn,
+  getMarginalTaxRate,
+} from './taxCalculations';
+import { calculateCPPBenefit, calculateOASBenefit } from './governmentBenefits';
 
 // Helper: Add months to a date
 function addMonths(dateStr: string, months: number): Date {
@@ -51,6 +58,8 @@ export function projectNetWorth(
   
   console.log('[projections] Starting net worth:', startingNetWorth);
   console.log('[projections] Monthly income:', avgMonthlyIncome, 'expenses:', avgMonthlyExpenses, 'savings:', monthlySavings);
+  console.log('[projections] Projection years:', scenario.config.projectionYears, 'total months:', totalMonths);
+  console.log('[projections] Investment accounts:', investmentAccounts.length, 'total balance:', investmentBalance);
   
   // 2. Initialize projection state (clone accounts to avoid mutating originals)
   let currentAssets = accounts
@@ -72,10 +81,107 @@ export function projectNetWorth(
     
     // Apply inflation to expenses
     const yearsElapsed = month / 12;
-    const inflatedExpenses = avgMonthlyExpenses * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
+    let inflatedExpenses = avgMonthlyExpenses * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
     
-    // Apply salary growth to income
-    const grownIncome = avgMonthlyIncome * Math.pow(1 + scenario.assumptions.salaryGrowthRate, yearsElapsed);
+    // Determine if we're in retirement
+    const targetRetirementAge = scenario.assumptions.retirement?.targetRetirementAge || scenario.assumptions.targetRetirementAge;
+    const startDate = new Date(scenario.config.startDate);
+    const currentDate = addMonths(scenario.config.startDate, month);
+    const startYear = startDate.getFullYear();
+    const startMonth = startDate.getMonth();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth();
+    const currentAge = (currentYear - startYear) + ((currentMonth - startMonth) / 12);
+    const isRetired = targetRetirementAge && currentAge >= targetRetirementAge;
+    
+    // Calculate base income
+    let grownIncome = 0;
+    if (isRetired) {
+      // In retirement: use retirement expense ratio for expenses, and add government benefits
+      const retirementExpenseRatio = scenario.assumptions.retirement?.retirementExpenseRatio || scenario.assumptions.retirementExpenseRatio || 0.70;
+      inflatedExpenses = avgMonthlyExpenses * retirementExpenseRatio * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
+      
+      // Add CPP benefits
+      let cppIncome = 0;
+      if (scenario.assumptions.cpp?.person1?.expectedBenefit) {
+        cppIncome += scenario.assumptions.cpp.person1.expectedBenefit;
+      }
+      if (scenario.assumptions.cpp?.person2?.expectedBenefit) {
+        cppIncome += scenario.assumptions.cpp.person2.expectedBenefit;
+      }
+      
+      // Add OAS benefits (with clawback consideration)
+      let oasIncome = 0;
+      const currentAnnualIncome = grownIncome * 12; // Will be updated below
+      if (scenario.assumptions.oas?.person1?.expectedBenefit) {
+        const oas1 = calculateOASBenefit(
+          scenario.assumptions.oas.person1,
+          currentAnnualIncome
+        );
+        oasIncome += oas1;
+      }
+      if (scenario.assumptions.oas?.person2?.expectedBenefit) {
+        const oas2 = calculateOASBenefit(
+          scenario.assumptions.oas.person2,
+          currentAnnualIncome
+        );
+        oasIncome += oas2;
+      }
+      
+      // Calculate withdrawal from investments
+      const withdrawalRate = scenario.assumptions.retirement?.withdrawalRate || scenario.assumptions.withdrawalRate || 0.04;
+      const annualWithdrawalRate = withdrawalRate / 12; // Monthly
+      const investmentWithdrawal = investmentBalance * annualWithdrawalRate;
+      
+      // Apply withdrawal strategy
+      let withdrawalIncome = 0;
+      const withdrawalStrategy = scenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized';
+      
+      if (withdrawalStrategy === 'rrsp_first') {
+        // Withdraw from RRSP first
+        const rrspAccounts = investmentAccounts.filter(a => a.type === 'rrsp' || a.type === 'dcpp');
+        const rrspBalance = rrspAccounts.reduce((sum, a) => sum + a.balance, 0);
+        if (rrspBalance > 0) {
+          withdrawalIncome = Math.min(investmentWithdrawal, rrspBalance * annualWithdrawalRate);
+        } else {
+          // Fall back to TFSA
+          const tfsaAccounts = investmentAccounts.filter(a => a.type === 'tfsa');
+          const tfsaBalance = tfsaAccounts.reduce((sum, a) => sum + a.balance, 0);
+          withdrawalIncome = Math.min(investmentWithdrawal, tfsaBalance * annualWithdrawalRate);
+        }
+      } else if (withdrawalStrategy === 'tfsa_first') {
+        // Withdraw from TFSA first
+        const tfsaAccounts = investmentAccounts.filter(a => a.type === 'tfsa');
+        const tfsaBalance = tfsaAccounts.reduce((sum, a) => sum + a.balance, 0);
+        if (tfsaBalance > 0) {
+          withdrawalIncome = Math.min(investmentWithdrawal, tfsaBalance * annualWithdrawalRate);
+        } else {
+          // Fall back to RRSP
+          const rrspAccounts = investmentAccounts.filter(a => a.type === 'rrsp' || a.type === 'dcpp');
+          const rrspBalance = rrspAccounts.reduce((sum, a) => sum + a.balance, 0);
+          withdrawalIncome = Math.min(investmentWithdrawal, rrspBalance * annualWithdrawalRate);
+        }
+      } else if (withdrawalStrategy === 'balanced') {
+        // Withdraw proportionally
+        withdrawalIncome = investmentWithdrawal;
+      } else {
+        // Tax-optimized: balance between RRSP and TFSA to minimize taxes
+        withdrawalIncome = investmentWithdrawal;
+      }
+      
+      grownIncome = cppIncome + oasIncome + withdrawalIncome;
+      
+      // Add healthcare and long-term care costs if specified
+      if (scenario.assumptions.retirement?.healthcareCosts) {
+        inflatedExpenses += scenario.assumptions.retirement.healthcareCosts / 12;
+      }
+      if (scenario.assumptions.retirement?.longTermCareCosts) {
+        inflatedExpenses += scenario.assumptions.retirement.longTermCareCosts / 12;
+      }
+    } else {
+      // Not retired: use salary growth
+      grownIncome = avgMonthlyIncome * Math.pow(1 + scenario.assumptions.salaryGrowthRate, yearsElapsed);
+    }
     
     // Calculate savings
     let savings = grownIncome - inflatedExpenses;
@@ -109,27 +215,219 @@ export function projectNetWorth(
       }
     });
     
-    // Apply investment growth to investment accounts
+    // Apply investment growth to investment accounts (tax-aware)
     const investmentAccounts = currentAssets.filter(a => 
       ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(a.type)
     );
     const investmentBalance = investmentAccounts.reduce((sum, a) => sum + a.balance, 0);
-    const monthlyInvestmentReturn = scenario.assumptions.investmentReturnRate / 12;
-    const investmentGrowth = investmentBalance * monthlyInvestmentReturn;
+    
+    // Calculate taxable income for tax calculations (simplified: use grown income)
+    const taxableIncome = grownIncome * 12; // Annual taxable income
     
     // Add new contributions to investments (assume 70% of savings goes to investments)
     const investmentAllocation = 0.7; // 70% to investments, 30% to cash
     const investmentContributions = savings * investmentAllocation;
     
-    // Distribute contributions across investment accounts proportionally
-    if (investmentAccounts.length > 0 && investmentContributions > 0) {
-      const totalInvestmentBalance = investmentBalance || 1; // Avoid division by zero
+    let totalInvestmentGrowth = 0;
+    let totalInvestmentDividends = 0;
+    let totalTaxPaid = 0;
+    
+    // Process each investment account separately to apply per-account/holding rates and taxes
+    if (investmentAccounts.length > 0) {
+      // First pass: calculate returns and update balances
       investmentAccounts.forEach(acc => {
-        const proportion = acc.balance / totalInvestmentBalance;
-        const contribution = investmentContributions * proportion;
-        const growth = acc.balance * monthlyInvestmentReturn;
-        acc.balance += contribution + growth;
+        // Get return rates for this account (check holdings if available)
+        let accountGrowthRate: number;
+        let accountDividendYield: number;
+        let accountDividendType: 'canadian_eligible' | 'canadian_non_eligible' | 'foreign' | 'none' = 'canadian_eligible';
+        
+        if (acc.holdings && acc.holdings.length > 0) {
+          // If account has holdings, calculate weighted average rates
+          let totalHoldingValue = 0;
+          let weightedGrowth = 0;
+          let weightedDividend = 0;
+          
+          acc.holdings.forEach(holding => {
+            const holdingValue = holding.shares * holding.currentPrice;
+            const rates = getHoldingReturnRates(holding, acc, scenario.assumptions);
+            weightedGrowth += holdingValue * rates.growthRate;
+            weightedDividend += holdingValue * rates.dividendYield;
+            if (rates.dividendType) accountDividendType = rates.dividendType;
+            totalHoldingValue += holdingValue;
+          });
+          
+          accountGrowthRate = totalHoldingValue > 0 ? weightedGrowth / totalHoldingValue : 
+            (scenario.assumptions.investmentGrowthRate ?? scenario.assumptions.investmentReturnRate * 0.7);
+          accountDividendYield = totalHoldingValue > 0 ? weightedDividend / totalHoldingValue :
+            (scenario.assumptions.investmentDividendYield ?? scenario.assumptions.investmentReturnRate * 0.3);
+        } else {
+          // Use account-specific rates or scenario defaults
+          accountGrowthRate = acc.investmentGrowthRate ?? 
+            scenario.assumptions.investmentGrowthRate ?? 
+            (scenario.assumptions.investmentReturnRate * 0.7);
+          accountDividendYield = acc.investmentDividendYield ?? 
+            scenario.assumptions.investmentDividendYield ?? 
+            (scenario.assumptions.investmentReturnRate * 0.3);
+        }
+        
+        // Log rates for debugging (first month only)
+        if (month === 0 && acc.name) {
+          console.log(`[projections] Account ${acc.name}: balance=${acc.balance.toFixed(2)}, growthRate=${(accountGrowthRate * 100).toFixed(2)}%, dividendYield=${(accountDividendYield * 100).toFixed(2)}%`);
+        }
+        
+        // Calculate investment return for this account (monthly)
+        const returnData = calculateInvestmentReturn(acc.balance, accountGrowthRate, accountDividendYield);
+        
+        // Log first month returns for debugging
+        if (month === 0 && acc.name) {
+          console.log(`[projections] Account ${acc.name} return: growth=${returnData.growth.toFixed(2)}, dividends=${returnData.dividends.toFixed(2)}, total=${returnData.total.toFixed(2)}`);
+        }
+        
+        // Calculate after-tax return (only applies to non-registered accounts)
+        const afterTaxReturn = calculateAfterTaxReturn(
+          returnData,
+          acc,
+          scenario.assumptions,
+          taxableIncome
+        );
+        
+        // Update account balance with after-tax return (compounding)
+        const balanceBefore = acc.balance;
+        acc.balance += afterTaxReturn.totalAfterTax;
+        
+        // Log first month balance changes for debugging
+        if (month === 0 && acc.name) {
+          console.log(`[projections] Account ${acc.name}: ${balanceBefore.toFixed(2)} -> ${acc.balance.toFixed(2)} (change: ${afterTaxReturn.totalAfterTax.toFixed(2)})`);
+        }
+        
+        // Track totals
+        totalInvestmentGrowth += afterTaxReturn.afterTaxGrowth;
+        totalInvestmentDividends += afterTaxReturn.afterTaxDividends;
+        totalTaxPaid += afterTaxReturn.taxPaid;
       });
+      
+      // Second pass: add contributions proportionally based on updated balances
+      if (investmentContributions > 0) {
+        const totalBalanceAfterReturns = investmentAccounts.reduce((sum, a) => sum + a.balance, 0);
+        if (totalBalanceAfterReturns > 0) {
+          investmentAccounts.forEach(acc => {
+            const proportion = acc.balance / totalBalanceAfterReturns;
+            const contribution = investmentContributions * proportion;
+            acc.balance += contribution;
+            
+            // Log first month contributions for debugging
+            if (month === 0 && acc.name) {
+              console.log(`[projections] Account ${acc.name} contribution: ${contribution.toFixed(2)} (proportion: ${(proportion * 100).toFixed(2)}%)`);
+            }
+          });
+        } else {
+          // If all balances are zero, split contributions equally
+          const contributionPerAccount = investmentContributions / investmentAccounts.length;
+          investmentAccounts.forEach(acc => {
+            acc.balance += contributionPerAccount;
+          });
+        }
+      }
+    }
+    
+    const investmentGrowth = totalInvestmentGrowth + totalInvestmentDividends; // Total after-tax growth
+    
+    // Handle RESP contributions and CESG grants
+    if (scenario.assumptions.resp?.annualContribution && !isRetired) {
+      const respAccounts = investmentAccounts.filter(a => a.type === 'resp');
+      const monthlyRESPContribution = scenario.assumptions.resp.annualContribution / 12;
+      const cesgMatch = scenario.assumptions.resp.cesgMatch || 0.20;
+      const monthlyCESG = monthlyRESPContribution * cesgMatch; // CESG matches 20% of contributions
+      
+      if (respAccounts.length > 0 && monthlyRESPContribution > 0) {
+        respAccounts.forEach(acc => {
+          acc.balance += monthlyRESPContribution / respAccounts.length;
+          acc.balance += monthlyCESG / respAccounts.length; // Add CESG grant
+        });
+        savings -= monthlyRESPContribution; // Deduct from available savings
+      }
+    }
+    
+    // Handle RESP withdrawals for education (if education start year reached)
+    if (scenario.assumptions.resp?.expectedEducationStart && scenario.assumptions.resp?.educationCosts) {
+      const educationStartYear = scenario.assumptions.resp.expectedEducationStart;
+      if (year >= educationStartYear && year < educationStartYear + 4) { // Assume 4 years of education
+        const respAccounts = investmentAccounts.filter(a => a.type === 'resp');
+        const monthlyEducationCost = scenario.assumptions.resp.educationCosts / 12;
+        const respBalance = respAccounts.reduce((sum, a) => sum + a.balance, 0);
+        
+        if (respBalance > 0) {
+          const withdrawal = Math.min(monthlyEducationCost, respBalance);
+          respAccounts.forEach(acc => {
+            const proportion = acc.balance / respBalance;
+            acc.balance -= withdrawal * proportion;
+          });
+          savings += withdrawal; // Add withdrawal to available savings
+          inflatedExpenses -= monthlyEducationCost; // Education costs reduce expenses
+        }
+      }
+    }
+    
+    // Apply retirement withdrawals if in retirement
+    if (isRetired) {
+      const withdrawalRate = scenario.assumptions.retirement?.withdrawalRate || scenario.assumptions.withdrawalRate || 0.04;
+      const monthlyWithdrawalRate = withdrawalRate / 12; // Monthly
+      const withdrawalStrategy = scenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized';
+      const rrspAccounts = investmentAccounts.filter(a => a.type === 'rrsp' || a.type === 'dcpp');
+      const tfsaAccounts = investmentAccounts.filter(a => a.type === 'tfsa');
+      const rrspBalance = rrspAccounts.reduce((sum, a) => sum + a.balance, 0);
+      const tfsaBalance = tfsaAccounts.reduce((sum, a) => sum + a.balance, 0);
+      const totalBalance = rrspBalance + tfsaBalance;
+      const investmentWithdrawal = totalBalance * monthlyWithdrawalRate;
+      
+      if (totalBalance > 0 && investmentWithdrawal > 0) {
+        if (withdrawalStrategy === 'rrsp_first') {
+          // Withdraw from RRSP first
+          if (rrspBalance > 0) {
+            const withdrawal = Math.min(investmentWithdrawal, rrspBalance * monthlyWithdrawalRate);
+            rrspAccounts.forEach(acc => {
+              const proportion = acc.balance / rrspBalance;
+              acc.balance -= withdrawal * proportion;
+            });
+          } else if (tfsaBalance > 0) {
+            const withdrawal = Math.min(investmentWithdrawal, tfsaBalance * monthlyWithdrawalRate);
+            tfsaAccounts.forEach(acc => {
+              const proportion = acc.balance / tfsaBalance;
+              acc.balance -= withdrawal * proportion;
+            });
+          }
+        } else if (withdrawalStrategy === 'tfsa_first') {
+          // Withdraw from TFSA first
+          if (tfsaBalance > 0) {
+            const withdrawal = Math.min(investmentWithdrawal, tfsaBalance * monthlyWithdrawalRate);
+            tfsaAccounts.forEach(acc => {
+              const proportion = acc.balance / tfsaBalance;
+              acc.balance -= withdrawal * proportion;
+            });
+          } else if (rrspBalance > 0) {
+            const withdrawal = Math.min(investmentWithdrawal, rrspBalance * monthlyWithdrawalRate);
+            rrspAccounts.forEach(acc => {
+              const proportion = acc.balance / rrspBalance;
+              acc.balance -= withdrawal * proportion;
+            });
+          }
+        } else {
+          // Balanced or tax-optimized: withdraw proportionally
+          const withdrawal = investmentWithdrawal;
+          if (rrspBalance > 0) {
+            rrspAccounts.forEach(acc => {
+              const proportion = acc.balance / totalBalance;
+              acc.balance -= withdrawal * proportion;
+            });
+          }
+          if (tfsaBalance > 0) {
+            tfsaAccounts.forEach(acc => {
+              const proportion = acc.balance / totalBalance;
+              acc.balance -= withdrawal * proportion;
+            });
+          }
+        }
+      }
     }
     
     // Add remaining savings to cash accounts
@@ -211,6 +509,8 @@ export function projectNetWorth(
       savingsRate: grownIncome > 0 ? (savings / grownIncome) * 100 : 0,
       investmentGrowth,
       investmentContributions,
+      investmentDividends: totalInvestmentDividends,
+      investmentTaxPaid: totalTaxPaid,
       debtPayments: totalDebtPayments,
       principalPaydown: totalPrincipalPaydown,
       interestPaid: totalInterestPaid,
@@ -428,7 +728,7 @@ function formatCurrency(amount: number): string {
 }
 
 // Create default scenario
-export function createDefaultScenario(householdId: string): ProjectionScenario {
+export function createDefaultScenario(householdId: string, province?: string): ProjectionScenario {
   const now = new Date();
   return {
     id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -438,11 +738,13 @@ export function createDefaultScenario(householdId: string): ProjectionScenario {
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     assumptions: {
-      investmentReturnRate: 0.06, // 6% annual
+      investmentReturnRate: 0.06, // 6% annual (total return)
+      investmentGrowthRate: 0.042, // 4.2% annual (70% of total)
+      investmentDividendYield: 0.018, // 1.8% annual (30% of total)
       inflationRate: 0.02, // 2% annual
       salaryGrowthRate: 0.03, // 3% annual
-      marginalTaxRate: 0.30, // 30%
-      rrspDeductionBenefit: 0.30, // 30% tax savings
+      province: province as any, // Use household province if available
+      // marginalTaxRate and rrspDeductionBenefit will be calculated from province and income
     },
     config: {
       projectionYears: 10,

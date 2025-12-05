@@ -3,7 +3,7 @@
 export type Household = {
   id: string;
   name: string;
-  province?: string; // Optional, non-functional in v0.1
+  province?: 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'NT' | 'NU' | 'ON' | 'PE' | 'QC' | 'SK' | 'YT'; // Canadian province/territory
   owners?: string[]; // List of owners/people (e.g., ["Person 1", "Person 2", "Joint"])
 };
 
@@ -15,6 +15,10 @@ export type Holding = {
   currentPrice: number; // Current price per share (manual entry or API-fetched)
   currency: 'CAD' | 'USD';
   lastPriceUpdate?: string; // ISO timestamp of last price update
+  // Investment return rates (optional, overrides account/scenario defaults)
+  growthRate?: number; // Annual capital appreciation rate (e.g., 0.05 = 5%)
+  dividendYield?: number; // Annual dividend yield (e.g., 0.03 = 3%)
+  dividendType?: 'canadian_eligible' | 'canadian_non_eligible' | 'foreign' | 'none'; // Dividend tax treatment
 };
 
 export type Account = {
@@ -30,6 +34,9 @@ export type Account = {
   owner?: string; // Owner of the account (e.g., "Person 1", "Person 2", "Joint", "Household")
   useHoldings?: boolean; // If true, calculate balance from holdings; if false, use manual balance
   holdings?: Holding[]; // Holdings for investment accounts (TFSA, RRSP, DCPP, RESP, non_registered)
+  // Investment return rates (optional, overrides scenario defaults, applies to all holdings in account)
+  investmentGrowthRate?: number; // Annual capital appreciation rate (e.g., 0.05 = 5%)
+  investmentDividendYield?: number; // Annual dividend yield (e.g., 0.03 = 3%)
   // Mortgage-specific fields for projections
   monthlyPayment?: number; // Monthly payment amount
   termRemainingMonths?: number; // Remaining term in months
@@ -130,19 +137,93 @@ export type LifeEvent = {
 };
 
 export type ProjectionAssumptions = {
-  // Investment returns
-  investmentReturnRate: number; // e.g., 0.06 (6% annual)
+  // Investment returns (defaults, can be overridden per account/holding)
+  investmentReturnRate: number; // e.g., 0.06 (6% annual) - total return (growth + dividends)
+  investmentGrowthRate?: number; // e.g., 0.04 (4% annual) - capital appreciation only
+  investmentDividendYield?: number; // e.g., 0.02 (2% annual) - dividend yield only
+  // If growthRate and dividendYield are specified, they override investmentReturnRate
+  
   inflationRate: number; // e.g., 0.02 (2% annual)
   salaryGrowthRate: number; // e.g., 0.03 (3% annual)
   
-  // Tax assumptions (simplified)
-  marginalTaxRate: number; // e.g., 0.30 (30%)
-  rrspDeductionBenefit: number; // Tax savings from RRSP contributions
+  // Tax assumptions
+  province?: 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'NT' | 'NU' | 'ON' | 'PE' | 'QC' | 'SK' | 'YT'; // Province for tax calculations
+  taxableIncome?: number; // Annual taxable income (for calculating marginal tax rate)
+  marginalTaxRate?: number; // e.g., 0.30 (30%) - if not provided, calculated from province and taxableIncome
+  rrspDeductionBenefit?: number; // Tax savings from RRSP contributions (calculated if not provided)
   
-  // Retirement (optional)
+  // Retirement (optional - kept for backward compatibility, new fields in retirement object)
   targetRetirementAge?: number;
   retirementExpenseRatio?: number; // e.g., 0.70 (70% of current expenses)
   withdrawalRate?: number; // e.g., 0.04 (4% rule)
+  
+  // Government Benefits (CPP/QPP & OAS)
+  cpp?: {
+    person1?: {
+      yearsOfContributions?: number;
+      averageContributions?: number; // Average YMPE contribution
+      expectedBenefit?: number; // Monthly benefit at 65
+      startAge?: number; // When to start taking CPP (60-70)
+    };
+    person2?: {
+      yearsOfContributions?: number;
+      averageContributions?: number;
+      expectedBenefit?: number;
+      startAge?: number;
+    };
+  };
+  oas?: {
+    person1?: {
+      yearsInCanada?: number; // For partial OAS
+      expectedBenefit?: number; // Monthly benefit
+      startAge?: number; // When to start (65-70)
+      clawbackThreshold?: number; // Income threshold for clawback
+    };
+    person2?: {
+      yearsInCanada?: number;
+      expectedBenefit?: number;
+      startAge?: number;
+      clawbackThreshold?: number;
+    };
+  };
+  
+  // Account Contribution Rooms (Manual Entry)
+  contributionRooms?: {
+    rrsp?: {
+      person1?: number;
+      person2?: number;
+    };
+    tfsa?: {
+      person1?: number;
+      person2?: number;
+    };
+    resp?: {
+      total?: number; // Family RESP
+      cesgEligible?: boolean; // Canada Education Savings Grant eligibility
+    };
+  };
+  
+  // Retirement Planning (Comprehensive)
+  retirement?: {
+    targetRetirementAge?: number; // Primary earner
+    targetRetirementAge2?: number; // Secondary earner (if applicable)
+    retirementExpenseRatio?: number; // e.g., 0.70 (70% of current expenses)
+    withdrawalRate?: number; // e.g., 0.04 (4% rule)
+    withdrawalStrategy?: 'rrsp_first' | 'tfsa_first' | 'balanced' | 'tax_optimized';
+    healthcareCosts?: number; // Annual healthcare costs in retirement
+    longTermCareCosts?: number; // Annual LTC costs (optional)
+    oasClawbackPlanning?: boolean; // Plan withdrawals to minimize OAS clawback
+    taxOptimizedSequence?: boolean; // Optimize withdrawal order for taxes
+  };
+  
+  // RESP Specific
+  resp?: {
+    annualContribution?: number;
+    cesgMatch?: number; // CESG matching rate (typically 0.20 for 20%)
+    beneficiaryAge?: number; // Child's current age
+    expectedEducationStart?: number; // Year when education starts
+    educationCosts?: number; // Annual education costs
+  };
 };
 
 export type ProjectionConfig = {
@@ -202,6 +283,8 @@ export type ProjectionMonth = {
   // Investment growth
   investmentGrowth: number;
   investmentContributions: number;
+  investmentDividends?: number; // Dividend income (before tax for non-registered)
+  investmentTaxPaid?: number; // Tax paid on investment returns (non-registered accounts only)
   
   // Debt payments
   debtPayments: number;

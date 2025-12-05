@@ -134,3 +134,5 @@ export const MonthlyComparison = ({ transactions }: MonthlyComparisonProps) => {
   );
 };
 
+
+

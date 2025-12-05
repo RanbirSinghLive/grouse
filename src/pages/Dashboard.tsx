@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import {
   calcNetWorth,
@@ -13,7 +14,9 @@ import { AssetMixChart } from '../components/AssetMixChart';
 import { CashflowGauge } from '../components/CashflowGauge';
 
 export const Dashboard = () => {
-  const { accounts, transactions } = useHouseholdStore();
+  const { accounts, transactions, refreshAllHoldingPrices } = useHouseholdStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<{ current: number; total: number; ticker: string } | null>(null);
 
   const netWorth = calcNetWorth(accounts);
   const monthlyCashflow = calcMonthlyCashflowFromTransactions(transactions);
@@ -26,9 +29,93 @@ export const Dashboard = () => {
 
   console.log('[Dashboard] Rendering with', accounts.length, 'accounts and', transactions.length, 'transactions');
 
+  const handleRefreshAllPrices = async () => {
+    console.log('[Dashboard] Refreshing all prices');
+    setIsRefreshing(true);
+    setRefreshProgress(null);
+
+    try {
+      await refreshAllHoldingPrices(
+        (current, total, ticker) => {
+          setRefreshProgress({ current, total, ticker });
+        }
+      );
+      setRefreshProgress(null);
+      alert('All prices updated successfully!');
+    } catch (error) {
+      console.error('[Dashboard] Error refreshing prices:', error);
+      alert('Error updating prices: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      setIsRefreshing(false);
+      setRefreshProgress(null);
+    }
+  };
+
+  // Count unique tickers across all accounts
+  const accountsWithHoldings = accounts.filter(
+    acc => acc.useHoldings && acc.holdings && acc.holdings.length > 0
+  );
+  const uniqueTickers = new Set<string>();
+  accountsWithHoldings.forEach(account => {
+    account.holdings?.forEach(holding => {
+      if (holding.ticker && holding.ticker !== 'CASH') {
+        uniqueTickers.add(holding.ticker);
+      }
+    });
+  });
+  const tickerCount = uniqueTickers.size;
+  const estimatedTime = tickerCount > 0 ? (tickerCount - 1) * 12 + 2 : 0; // ~1-2s for first, 12s for subsequent
+
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h1>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        {tickerCount > 0 && (
+          <button
+            onClick={handleRefreshAllPrices}
+            disabled={isRefreshing}
+            className={`px-6 py-3 rounded-lg font-semibold text-white transition-all flex items-center gap-2 ${
+              isRefreshing
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 hover:shadow-lg active:scale-95'
+            }`}
+          >
+            <span className={`text-lg ${isRefreshing ? 'animate-spin' : ''}`}>🔄</span>
+            {isRefreshing ? (
+              <span>
+                Refreshing {refreshProgress ? `${refreshProgress.current}/${refreshProgress.total}` : '...'} 
+                {refreshProgress && refreshProgress.ticker && ` (${refreshProgress.ticker})`}
+              </span>
+            ) : (
+              <span>Refresh All Prices</span>
+            )}
+          </button>
+        )}
+      </div>
+      
+      {isRefreshing && refreshProgress && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-blue-900">
+              Refreshing prices: {refreshProgress.current} of {refreshProgress.total}
+            </span>
+            <span className="text-sm text-blue-700">
+              {refreshProgress.ticker}
+            </span>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-2">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${(refreshProgress.current / refreshProgress.total) * 100}%` }}
+            />
+          </div>
+          {estimatedTime > 0 && (
+            <p className="text-xs text-blue-600 mt-2">
+              Estimated time remaining: ~{Math.ceil((refreshProgress.total - refreshProgress.current) * 12 / 60)} minutes
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
