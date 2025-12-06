@@ -9,12 +9,6 @@ export const Settings = () => {
   const [householdName, setHouseholdName] = useState(household?.name || '');
   const [householdProvince, setHouseholdProvince] = useState<Province | ''>(household?.province || '');
   const [financialIndependenceYears, setFinancialIndependenceYears] = useState(household?.financialIndependenceYears || 25);
-  const [person1Nickname, setPerson1Nickname] = useState(household?.personProfiles?.person1?.nickname || '');
-  const [person1Age, setPerson1Age] = useState(household?.personProfiles?.person1?.age || undefined);
-  const [person1AnnualIncome, setPerson1AnnualIncome] = useState(household?.personProfiles?.person1?.annualIncome || undefined);
-  const [person2Nickname, setPerson2Nickname] = useState(household?.personProfiles?.person2?.nickname || '');
-  const [person2Age, setPerson2Age] = useState(household?.personProfiles?.person2?.age || undefined);
-  const [person2AnnualIncome, setPerson2AnnualIncome] = useState(household?.personProfiles?.person2?.annualIncome || undefined);
   const [newOwner, setNewOwner] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
@@ -35,20 +29,11 @@ export const Settings = () => {
     return Array.from(categories).sort();
   }, [cashflows, transactions, patterns]);
 
-  // Check if Person 2 exists
-  const hasPerson2 = !!household?.personProfiles?.person2;
-
-  // Update household name, province, and person profiles when household changes
+  // Update household name and province when household changes
   useEffect(() => {
     setHouseholdName(household?.name || '');
     setHouseholdProvince(household?.province || '');
     setFinancialIndependenceYears(household?.financialIndependenceYears || 25);
-    setPerson1Nickname(household?.personProfiles?.person1?.nickname || '');
-    setPerson1Age(household?.personProfiles?.person1?.age);
-    setPerson1AnnualIncome(household?.personProfiles?.person1?.annualIncome);
-    setPerson2Nickname(household?.personProfiles?.person2?.nickname || '');
-    setPerson2Age(household?.personProfiles?.person2?.age);
-    setPerson2AnnualIncome(household?.personProfiles?.person2?.annualIncome);
   }, [household]);
 
   const handleStartEditCategory = (category: string) => {
@@ -78,61 +63,6 @@ export const Settings = () => {
   const handleCancelEditCategory = () => {
     setEditingCategory(null);
     setCategoryEditValue('');
-  };
-
-  const handleSavePersonProfiles = () => {
-    if (!household) return;
-    console.log('[Settings] Saving person profiles');
-    const personProfiles: { person1?: any; person2?: any } = {
-      person1: {
-        nickname: person1Nickname || undefined,
-        age: person1Age || undefined,
-        annualIncome: person1AnnualIncome || undefined,
-      },
-    };
-    
-    // Only include person2 if they have data or already exist
-    if (hasPerson2 || person2Nickname || person2Age || person2AnnualIncome) {
-      personProfiles.person2 = {
-        nickname: person2Nickname || undefined,
-        age: person2Age || undefined,
-        annualIncome: person2AnnualIncome || undefined,
-      };
-    }
-    
-    setHousehold({
-      ...household,
-      personProfiles,
-    });
-    alert('Person profiles saved!');
-  };
-
-  const handleAddPerson2 = () => {
-    if (!household) return;
-    console.log('[Settings] Adding Person 2');
-    setHousehold({
-      ...household,
-      personProfiles: {
-        ...household.personProfiles,
-        person2: {
-          nickname: '',
-          age: undefined,
-          annualIncome: undefined,
-        },
-      },
-    });
-  };
-
-  const handleRemovePerson2 = () => {
-    if (!household) return;
-    if (!window.confirm('Are you sure you want to remove Person 2?')) return;
-    console.log('[Settings] Removing Person 2');
-    const personProfiles = { ...household.personProfiles };
-    delete personProfiles.person2;
-    setHousehold({
-      ...household,
-      personProfiles: Object.keys(personProfiles).length > 0 ? personProfiles : undefined,
-    });
   };
 
   const handleSaveHousehold = () => {
@@ -225,144 +155,6 @@ export const Settings = () => {
   return (
     <div>
       <h1 className="text-3xl font-bold text-gray-900 mb-8">Settings</h1>
-
-      {/* Person Profiles */}
-      <div className="bg-gradient-to-br from-white to-indigo-50 p-8 rounded-2xl shadow-lg border-2 border-indigo-200 mb-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-          <span className="text-2xl">👤</span>
-          Person Profiles
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Person 1 */}
-          <div className="bg-white p-6 rounded-lg border border-indigo-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Person 1</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nickname
-                </label>
-                <input
-                  type="text"
-                  value={person1Nickname}
-                  onChange={(e) => setPerson1Nickname(e.target.value)}
-                  placeholder="e.g., John, Sarah"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Age
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="120"
-                  value={person1Age || ''}
-                  onChange={(e) => setPerson1Age(e.target.value ? parseInt(e.target.value) : undefined)}
-                  placeholder="Enter age"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Annual Income (CAD)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1000"
-                  value={person1AnnualIncome || ''}
-                  onChange={(e) => setPerson1AnnualIncome(e.target.value ? parseFloat(e.target.value) : undefined)}
-                  placeholder="Enter annual income"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
-                />
-                {person1AnnualIncome && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    ${person1AnnualIncome.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} per year
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Person 2 */}
-          {hasPerson2 ? (
-            <div className="bg-white p-6 rounded-lg border border-indigo-100">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Person 2</h3>
-                <button
-                  onClick={handleRemovePerson2}
-                  className="text-red-600 hover:text-red-800 text-sm font-medium"
-                >
-                  Remove
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Nickname
-                  </label>
-                  <input
-                    type="text"
-                    value={person2Nickname}
-                    onChange={(e) => setPerson2Nickname(e.target.value)}
-                    placeholder="e.g., John, Sarah"
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Age
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="120"
-                    value={person2Age || ''}
-                    onChange={(e) => setPerson2Age(e.target.value ? parseInt(e.target.value) : undefined)}
-                    placeholder="Enter age"
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Annual Income (CAD)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1000"
-                    value={person2AnnualIncome || ''}
-                    onChange={(e) => setPerson2AnnualIncome(e.target.value ? parseFloat(e.target.value) : undefined)}
-                    placeholder="Enter annual income"
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
-                  />
-                  {person2AnnualIncome && (
-                    <p className="mt-1 text-xs text-gray-500">
-                      ${person2AnnualIncome.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} per year
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 border-dashed flex items-center justify-center">
-              <button
-                onClick={handleAddPerson2}
-                className="px-6 py-3 bg-indigo-100 text-indigo-700 rounded-lg font-semibold hover:bg-indigo-200 transition-colors"
-              >
-                ➕ Add Person 2
-              </button>
-            </div>
-          )}
-        </div>
-        <button
-          onClick={handleSavePersonProfiles}
-          className="mt-6 px-8 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-indigo-800 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
-        >
-          💾 Save Person Profiles
-        </button>
-      </div>
 
       {/* Household Info */}
       <div className="bg-gradient-to-br from-white to-blue-50 p-8 rounded-2xl shadow-lg border-2 border-blue-200 mb-6">

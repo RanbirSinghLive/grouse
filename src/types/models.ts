@@ -157,6 +157,20 @@ export type ProjectionAssumptions = {
   inflationRate: number; // e.g., 0.02 (2% annual)
   salaryGrowthRate: number; // e.g., 0.03 (3% annual)
   
+  // Income & Employment (per person)
+  income?: {
+    person1?: {
+      annualIncome?: number; // Annual income in CAD
+      annualExpenses?: number; // Annual expenses in CAD
+      salaryGrowthRate?: number; // Per-person salary growth rate (overrides global if set)
+    };
+    person2?: {
+      annualIncome?: number;
+      annualExpenses?: number;
+      salaryGrowthRate?: number;
+    };
+  };
+  
   // Tax assumptions
   province?: 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'NT' | 'NU' | 'ON' | 'PE' | 'QC' | 'SK' | 'YT'; // Province for tax calculations
   taxableIncome?: number; // Annual taxable income (for calculating marginal tax rate)

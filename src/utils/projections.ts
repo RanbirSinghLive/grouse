@@ -1,5 +1,5 @@
 // Projection calculation engine for v0.2
-// Handles net worth projections, mortgage vs invest comparisons, and retirement planning
+// Handles net worth projections and retirement planning
 
 import type {
   Account,

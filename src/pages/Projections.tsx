@@ -1,9 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
-import { projectNetWorth, compareMortgageVsInvest, createDefaultScenario } from '../utils/projections';
+import { projectNetWorth, createDefaultScenario } from '../utils/projections';
 import type { ProjectionScenario, ProjectionResult, Account, Holding } from '../types/models';
 import { NetWorthProjectionChart } from '../components/NetWorthProjectionChart';
-import { MortgageVsInvestComparison } from '../components/MortgageVsInvestComparison';
 import { getAllProvinces, getProvinceName, type Province } from '../utils/canadianTaxRates';
 import { calcMonthlyIncomeFromTransactions, calcMonthlyExpensesFromTransactions } from '../utils/calculations';
 import { fetchHistoricalReturns } from '../utils/stockApi';
@@ -16,6 +15,7 @@ import { calculateCPPBenefit, calculateOASBenefit, estimateCPPContributionRate }
 export const Projections = () => {
   const {
     household,
+    setHousehold,
     accounts,
     transactions,
     projectionScenarios,
@@ -27,6 +27,13 @@ export const Projections = () => {
   } = useHouseholdStore();
 
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  // Person profile state
+  const [person1Nickname, setPerson1Nickname] = useState(household?.personProfiles?.person1?.nickname || '');
+  const [person1Age, setPerson1Age] = useState(household?.personProfiles?.person1?.age || undefined);
+  const [person2Nickname, setPerson2Nickname] = useState(household?.personProfiles?.person2?.nickname || '');
+  const [person2Age, setPerson2Age] = useState(household?.personProfiles?.person2?.age || undefined);
+  // Chart collapse state
+  const [chartExpanded, setChartExpanded] = useState(true);
   // Investment rate configuration state (reversed hierarchy: holding first)
   const [selectedHoldingTicker, setSelectedHoldingTicker] = useState<string | null>(null);
   const [fetchingRates, setFetchingRates] = useState(false);
@@ -68,32 +75,6 @@ export const Projections = () => {
   }, [currentScenario, accounts, transactions, household]);
 
   // Find mortgage for comparison
-  const mortgageAccount = useMemo(() => {
-    return accounts.find(a => a.type === 'mortgage' && a.kind === 'liability') || null;
-  }, [accounts]);
-
-  // Calculate monthly surplus for mortgage vs invest
-  const monthlySurplus = useMemo(() => {
-    if (!projectionResult) return 0;
-    // Use average savings from projection
-    const avgSavings = projectionResult.monthlyData.length > 0
-      ? projectionResult.monthlyData.reduce((sum, m) => sum + m.savings, 0) / projectionResult.monthlyData.length
-      : 0;
-    return Math.max(0, avgSavings);
-  }, [projectionResult]);
-
-  // Mortgage vs Invest comparison
-  const mortgageComparison = useMemo(() => {
-    if (!mortgageAccount || !currentScenario || monthlySurplus <= 0) {
-      return null;
-    }
-    try {
-      return compareMortgageVsInvest(mortgageAccount, monthlySurplus, currentScenario.assumptions);
-    } catch (error) {
-      console.error('[Projections] Error calculating mortgage comparison:', error);
-      return null;
-    }
-  }, [mortgageAccount, currentScenario, monthlySurplus]);
 
   // Calculate auto-calculated taxable income from transactions
   const autoCalculatedTaxableIncome = useMemo(() => {
@@ -102,10 +83,22 @@ export const Projections = () => {
     return annualIncome;
   }, [transactions]);
 
-  // Calculate auto-calculated monthly expenses
+  // Calculate auto-calculated monthly expenses (excluding mortgage payments)
   const autoCalculatedMonthlyExpenses = useMemo(() => {
-    return calcMonthlyExpensesFromTransactions(transactions);
-  }, [transactions]);
+    console.log('[Projections] Calculating monthly expenses excluding mortgage payments');
+    const totalExpenses = calcMonthlyExpensesFromTransactions(transactions);
+    
+    // Calculate total monthly mortgage payments from accounts
+    const monthlyMortgagePayments = accounts
+      .filter(a => a.kind === 'liability' && a.type === 'mortgage' && a.monthlyPayment)
+      .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0);
+    
+    console.log('[Projections] Total expenses:', totalExpenses, 'Mortgage payments:', monthlyMortgagePayments);
+    const expensesExcludingMortgage = totalExpenses - monthlyMortgagePayments;
+    console.log('[Projections] Expenses excluding mortgage:', expensesExcludingMortgage);
+    
+    return expensesExcludingMortgage;
+  }, [transactions, accounts]);
 
   // Auto-populate account balances for contribution rooms
   const accountBalances = useMemo(() => {
@@ -254,6 +247,27 @@ export const Projections = () => {
     setSelectedScenarioId(defaultScenario.id);
   };
 
+  // Update person profiles when household changes
+  useEffect(() => {
+    console.log('[Projections] Updating person profile state from household');
+    setPerson1Nickname(household?.personProfiles?.person1?.nickname || '');
+    setPerson1Age(household?.personProfiles?.person1?.age);
+    setPerson2Nickname(household?.personProfiles?.person2?.nickname || '');
+    setPerson2Age(household?.personProfiles?.person2?.age);
+  }, [household]);
+
+  // Check if Person 2 exists
+  const hasPerson2 = !!household?.personProfiles?.person2;
+
+  // Helper functions to get display names (nickname if available, otherwise "Person 1"/"Person 2")
+  const getPerson1Name = () => {
+    return person1Nickname.trim() || 'Person 1';
+  };
+
+  const getPerson2Name = () => {
+    return person2Nickname.trim() || 'Person 2';
+  };
+
   // Scroll to section handler for milestone clicks
   const scrollToSection = (sectionId: string) => {
     console.log('[Projections] Scrolling to section:', sectionId);
@@ -264,6 +278,58 @@ export const Projections = () => {
       element.classList.add('highlight-section');
       setTimeout(() => element.classList.remove('highlight-section'), 2000);
     }
+  };
+
+  const handleSavePersonProfiles = () => {
+    if (!household) return;
+    console.log('[Projections] Saving person profiles');
+    const personProfiles: { person1?: any; person2?: any } = {
+      person1: {
+        nickname: person1Nickname || undefined,
+        age: person1Age || undefined,
+      },
+    };
+    
+    // Only include person2 if they have data or already exist
+    if (hasPerson2 || person2Nickname || person2Age) {
+      personProfiles.person2 = {
+        nickname: person2Nickname || undefined,
+        age: person2Age || undefined,
+      };
+    }
+    
+    setHousehold({
+      ...household,
+      personProfiles,
+    });
+    alert('Person profiles saved!');
+  };
+
+  const handleAddPerson2 = () => {
+    if (!household) return;
+    console.log('[Projections] Adding Person 2');
+    setHousehold({
+      ...household,
+      personProfiles: {
+        ...household.personProfiles,
+        person2: {
+          nickname: '',
+          age: undefined,
+        },
+      },
+    });
+  };
+
+  const handleRemovePerson2 = () => {
+    if (!household) return;
+    if (!window.confirm(`Are you sure you want to remove ${getPerson2Name()}?`)) return;
+    console.log('[Projections] Removing Person 2');
+    const personProfiles = { ...household.personProfiles };
+    delete personProfiles.person2;
+    setHousehold({
+      ...household,
+      personProfiles: Object.keys(personProfiles).length > 0 ? personProfiles : undefined,
+    });
   };
 
   const handleDeleteScenario = (id: string) => {
@@ -376,6 +442,7 @@ export const Projections = () => {
         </button>
       </div>
 
+
       {projectionScenarios.length === 0 ? (
         <div className="bg-white p-12 rounded-2xl shadow-lg border-2 border-gray-200 text-center">
           <p className="text-gray-600 mb-6">No projection scenarios yet. Create your first scenario to get started.</p>
@@ -450,109 +517,318 @@ export const Projections = () => {
           {/* Projection Chart */}
           {projectionResult && currentScenario && (
             <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Net Worth Projection</h2>
-              <NetWorthProjectionChart 
-                result={projectionResult} 
-                scenario={currentScenario}
-                onMilestoneClick={scrollToSection}
-              />
-              
-              {/* Key Metrics */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Starting Net Worth</p>
-                  <p className="text-xl font-bold text-blue-900">
-                    ${projectionResult.summary.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="bg-emerald-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Ending Net Worth</p>
-                  <p className="text-xl font-bold text-emerald-900">
-                    ${projectionResult.summary.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Total Growth</p>
-                  <p className="text-xl font-bold text-purple-900">
-                    ${projectionResult.summary.totalGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="bg-orange-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Avg Annual Growth</p>
-                  <p className="text-xl font-bold text-orange-900">
-                    {projectionResult.summary.averageAnnualGrowth.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
+              <button
+                onClick={() => setChartExpanded(!chartExpanded)}
+                className="w-full flex items-center justify-between text-left mb-4"
+              >
+                <h2 className="text-2xl font-bold text-gray-900">Net Worth Projection</h2>
+                <svg
+                  className={`w-6 h-6 text-gray-500 transition-transform ${
+                    chartExpanded ? 'transform rotate-180' : ''
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+              {chartExpanded && (
+                <>
+                  <NetWorthProjectionChart 
+                    result={projectionResult} 
+                    scenario={currentScenario}
+                    onMilestoneClick={scrollToSection}
+                  />
+                  
+                  {/* Key Metrics */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                    <div className="bg-blue-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-600">Starting Net Worth</p>
+                      <p className="text-xl font-bold text-blue-900">
+                        ${projectionResult.summary.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+                    <div className="bg-emerald-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-600">Ending Net Worth</p>
+                      <p className="text-xl font-bold text-emerald-900">
+                        ${projectionResult.summary.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+                    <div className="bg-purple-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-600">Total Growth</p>
+                      <p className="text-xl font-bold text-purple-900">
+                        ${projectionResult.summary.totalGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+                    <div className="bg-orange-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-600">Avg Annual Growth</p>
+                      <p className="text-xl font-bold text-orange-900">
+                        {projectionResult.summary.averageAnnualGrowth.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
 
-              {projectionResult.summary.debtFreeDate && (
-                <div className="mt-4 p-4 bg-green-50 rounded-lg">
-                  <p className="text-sm font-medium text-green-800">
-                    🎉 Debt-Free Date: {new Date(projectionResult.summary.debtFreeDate).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </p>
-                </div>
+                  {projectionResult.summary.debtFreeDate && (
+                    <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                      <p className="text-sm font-medium text-green-800">
+                        🎉 Debt-Free Date: {new Date(projectionResult.summary.debtFreeDate).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
 
-          {/* Mortgage vs Invest Comparison */}
-          {mortgageAccount && mortgageComparison && (
-            <MortgageVsInvestComparison
-              mortgage={mortgageAccount}
-              comparison={mortgageComparison}
-              monthlySurplus={monthlySurplus}
-            />
-          )}
 
           {/* Projection Inputs - Always Visible */}
           {currentScenario && (
             <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Scenario Settings</h2>
               <div className="space-y-4">
+                {/* Person Profiles */}
+                {household && (
+                  <ProjectionInputSection
+                    id="person-profiles"
+                    title="Person Profiles"
+                    defaultExpanded={true}
+                    helpText="Demographic and income information for each person"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Person 1 */}
+                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <h3 className="text-md font-semibold text-gray-900 mb-4">{getPerson1Name()}</h3>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Nickname
+                            </label>
+                            <input
+                              type="text"
+                              value={person1Nickname}
+                              onChange={(e) => setPerson1Nickname(e.target.value)}
+                              placeholder="e.g., John, Sarah"
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Age
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="120"
+                              value={person1Age || ''}
+                              onChange={(e) => setPerson1Age(e.target.value ? parseInt(e.target.value) : undefined)}
+                              placeholder="Enter age"
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Person 2 */}
+                      {hasPerson2 ? (
+                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-md font-semibold text-gray-900">{getPerson2Name()}</h3>
+                            <button
+                              onClick={handleRemovePerson2}
+                              className="text-red-600 hover:text-red-800 text-sm font-medium"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Nickname
+                              </label>
+                              <input
+                                type="text"
+                                value={person2Nickname}
+                                onChange={(e) => setPerson2Nickname(e.target.value)}
+                                placeholder="e.g., John, Sarah"
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Age
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="120"
+                                value={person2Age || ''}
+                                onChange={(e) => setPerson2Age(e.target.value ? parseInt(e.target.value) : undefined)}
+                                placeholder="Enter age"
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 border-dashed flex items-center justify-center">
+                          <button
+                            onClick={handleAddPerson2}
+                            className="px-6 py-3 bg-blue-100 text-blue-700 rounded-lg font-semibold hover:bg-blue-200 transition-colors"
+                          >
+                            ➕ Add {getPerson2Name()}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <button
+                        onClick={handleSavePersonProfiles}
+                        className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-all"
+                      >
+                        💾 Save Person Profiles
+                      </button>
+                    </div>
+                  </ProjectionInputSection>
+                )}
+
                 {/* Income & Employment */}
                 <ProjectionInputSection
                   id="income-employment"
                   title="Income & Employment"
                   defaultExpanded={true}
-                  helpText="Current income breakdown and salary growth assumptions"
+                  helpText="Annual income, expenses, and salary growth assumptions per person"
                 >
+                  <PersonInputGroup
+                    person1Label={getPerson1Name()}
+                    person2Label={getPerson2Name()}
+                    showPerson2={hasPerson2}
+                    person1Content={
                       <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Current Monthly Income
-                            </label>
-                            <div className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-700">
-                              ${(autoCalculatedTaxableIncome / 12).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              <span className="text-xs text-gray-500 ml-2">(auto from transactions)</span>
-                            </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Annual Income (CAD)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1000"
+                            value={getNestedAssumption(['income', 'person1', 'annualIncome']) || ''}
+                            onChange={(e) => handleNestedAssumptionChange(['income', 'person1', 'annualIncome'], e.target.value ? parseFloat(e.target.value) : undefined)}
+                            placeholder="Enter annual income"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          {/* FYI Info - Auto-calculated from transactions */}
+                          <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-xs text-gray-600">
+                            <span className="font-medium">FYI:</span> Auto-calculated from transactions: ${autoCalculatedTaxableIncome.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/year
                           </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Current Monthly Expenses
-                            </label>
-                            <div className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-700">
-                              ${autoCalculatedMonthlyExpenses.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              <span className="text-xs text-gray-500 ml-2">(auto from transactions)</span>
-                            </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Annual Expenses (CAD)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1000"
+                            value={getNestedAssumption(['income', 'person1', 'annualExpenses']) || ''}
+                            onChange={(e) => handleNestedAssumptionChange(['income', 'person1', 'annualExpenses'], e.target.value ? parseFloat(e.target.value) : undefined)}
+                            placeholder="Enter annual expenses"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          {/* FYI Info - Auto-calculated from transactions (excluding mortgage payments) */}
+                          <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-xs text-gray-600">
+                            <span className="font-medium">FYI:</span> Auto-calculated from transactions (excluding mortgage payments): ${(autoCalculatedMonthlyExpenses * 12).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/year
                           </div>
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Salary Growth Rate: {(currentScenario.assumptions.salaryGrowthRate * 100).toFixed(1)}%
-                  </label>
+                            Salary Growth Rate: {((getNestedAssumption(['income', 'person1', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate) * 100).toFixed(1)}%
+                          </label>
                           <input
                             type="range"
                             min="0"
                             max="0.10"
                             step="0.001"
-                            value={currentScenario.assumptions.salaryGrowthRate}
-                            onChange={(e) => handleAssumptionChange('salaryGrowthRate', parseFloat(e.target.value))}
+                            value={getNestedAssumption(['income', 'person1', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate}
+                            onChange={(e) => handleNestedAssumptionChange(['income', 'person1', 'salaryGrowthRate'], parseFloat(e.target.value))}
                             className="w-full"
                           />
-                          <p className="text-xs text-gray-500 mt-1">Annual salary growth rate</p>
+                          <p className="text-xs text-gray-500 mt-1">Annual salary growth rate (uses global rate if not set)</p>
                         </div>
                       </div>
+                    }
+                    person2Content={
+                      hasPerson2 ? (
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Annual Income (CAD)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1000"
+                              value={getNestedAssumption(['income', 'person2', 'annualIncome']) || ''}
+                              onChange={(e) => handleNestedAssumptionChange(['income', 'person2', 'annualIncome'], e.target.value ? parseFloat(e.target.value) : undefined)}
+                              placeholder="Enter annual income"
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Annual Expenses (CAD)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1000"
+                              value={getNestedAssumption(['income', 'person2', 'annualExpenses']) || ''}
+                              onChange={(e) => handleNestedAssumptionChange(['income', 'person2', 'annualExpenses'], e.target.value ? parseFloat(e.target.value) : undefined)}
+                              placeholder="Enter annual expenses"
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Salary Growth Rate: {((getNestedAssumption(['income', 'person2', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate) * 100).toFixed(1)}%
+                            </label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="0.10"
+                              step="0.001"
+                              value={getNestedAssumption(['income', 'person2', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate}
+                              onChange={(e) => handleNestedAssumptionChange(['income', 'person2', 'salaryGrowthRate'], parseFloat(e.target.value))}
+                              className="w-full"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Annual salary growth rate (uses global rate if not set)</p>
+                          </div>
+                        </div>
+                      ) : undefined
+                    }
+                  />
+                  {/* Global Salary Growth Rate (if no per-person rates set) */}
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Global Salary Growth Rate: {(currentScenario.assumptions.salaryGrowthRate * 100).toFixed(1)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="0.10"
+                      step="0.001"
+                      value={currentScenario.assumptions.salaryGrowthRate}
+                      onChange={(e) => handleAssumptionChange('salaryGrowthRate', parseFloat(e.target.value))}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Default annual salary growth rate (used if per-person rates not set)</p>
+                  </div>
                 </ProjectionInputSection>
 
                 {/* Investments */}
@@ -837,8 +1113,8 @@ export const Projections = () => {
                         <div>
                           <h4 className="text-md font-semibold text-gray-800 mb-3">OAS Benefits</h4>
                           <PersonInputGroup
-                            person1Label="Person 1 OAS"
-                            person2Label="Person 2 OAS"
+                            person1Label={`${getPerson1Name()} OAS`}
+                            person2Label={`${getPerson2Name()} OAS`}
                             showPerson2={true}
                             person1Content={
                               <div className="space-y-3">
@@ -950,8 +1226,8 @@ export const Projections = () => {
                         <div>
                           <h4 className="text-md font-semibold text-gray-800 mb-3">RRSP Contribution Rooms</h4>
                           <PersonInputGroup
-                            person1Label="Person 1 RRSP Room"
-                            person2Label="Person 2 RRSP Room"
+                            person1Label={`${getPerson1Name()} RRSP Room`}
+                            person2Label={`${getPerson2Name()} RRSP Room`}
                             showPerson2={true}
                             person1Content={
                               <ContributionRoomInput
@@ -976,8 +1252,8 @@ export const Projections = () => {
                         <div>
                           <h4 className="text-md font-semibold text-gray-800 mb-3">TFSA Contribution Rooms</h4>
                           <PersonInputGroup
-                            person1Label="Person 1 TFSA Room"
-                            person2Label="Person 2 TFSA Room"
+                            person1Label={`${getPerson1Name()} TFSA Room`}
+                            person2Label={`${getPerson2Name()} TFSA Room`}
                             showPerson2={true}
                             person1Content={
                               <ContributionRoomInput
@@ -1037,7 +1313,7 @@ export const Projections = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Target Retirement Age (Person 1)
+                              Target Retirement Age ({getPerson1Name()})
                             </label>
                             <input
                               type="number"
@@ -1056,7 +1332,7 @@ export const Projections = () => {
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Target Retirement Age (Person 2)
+                              Target Retirement Age ({getPerson2Name()})
                             </label>
                             <input
                               type="number"

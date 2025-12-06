@@ -72,9 +72,7 @@ export const MortgageVsInvestComparison = ({
   };
 
   return (
-    <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
-      <h2 className="text-2xl font-bold text-gray-900 mb-4">Mortgage vs Invest Comparison</h2>
-      
+    <div>
       <div className="mb-6">
         <div className={`p-4 rounded-lg border-2 ${getRecommendationColor()}`}>
           <h3 className="font-bold text-lg mb-2">Recommendation: {comparison.recommendation.toUpperCase()}</h3>
