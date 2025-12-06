@@ -27,7 +27,6 @@ export const Projections = () => {
   } = useHouseholdStore();
 
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
-  const [editingScenario, setEditingScenario] = useState<ProjectionScenario | null>(null);
   // Investment rate configuration state (reversed hierarchy: holding first)
   const [selectedHoldingTicker, setSelectedHoldingTicker] = useState<string | null>(null);
   const [fetchingRates, setFetchingRates] = useState(false);
@@ -253,33 +252,18 @@ export const Projections = () => {
     const defaultScenario = createDefaultScenario(household.id, household.province);
     addProjectionScenario(defaultScenario);
     setSelectedScenarioId(defaultScenario.id);
-    setEditingScenario(defaultScenario);
   };
 
-  const handleEditScenario = (scenario: ProjectionScenario) => {
-    setEditingScenario(scenario);
-  };
-
-  const handleSaveScenario = () => {
-    if (!editingScenario) return;
-
-    if (editingScenario.id && projectionScenarios.find(s => s.id === editingScenario.id)) {
-      // Update existing
-      updateProjectionScenario(editingScenario.id, editingScenario);
-    } else {
-      // Create new
-      if (!household) {
-        alert('Please set up your household in Settings first.');
-        return;
-      }
-      const newScenario = {
-        ...editingScenario,
-        householdId: household.id,
-      };
-      addProjectionScenario(newScenario);
-      setSelectedScenarioId(newScenario.id);
+  // Scroll to section handler for milestone clicks
+  const scrollToSection = (sectionId: string) => {
+    console.log('[Projections] Scrolling to section:', sectionId);
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Highlight the section briefly
+      element.classList.add('highlight-section');
+      setTimeout(() => element.classList.remove('highlight-section'), 2000);
     }
-    setEditingScenario(null);
   };
 
   const handleDeleteScenario = (id: string) => {
@@ -291,14 +275,19 @@ export const Projections = () => {
     }
   };
 
-  const handleAssumptionChange = (key: keyof ProjectionScenario['assumptions'], value: number | string | object) => {
-    if (!editingScenario) return;
-    setEditingScenario({
-      ...editingScenario,
-      assumptions: {
-        ...editingScenario.assumptions,
-        [key]: value,
-      },
+  const handleAssumptionChange = (key: keyof ProjectionScenario['assumptions'], value: number | string | object | undefined) => {
+    if (!currentScenario) return;
+    console.log('[Projections] Updating assumption:', key, value);
+    const updatedAssumptions = { ...currentScenario.assumptions };
+    if (value === undefined) {
+      delete updatedAssumptions[key];
+    } else {
+      // Type-safe assignment using index signature
+      (updatedAssumptions as Record<string, any>)[key as string] = value;
+    }
+    updateProjectionScenario(currentScenario.id, {
+      ...currentScenario,
+      assumptions: updatedAssumptions,
     });
   };
 
@@ -307,9 +296,10 @@ export const Projections = () => {
     path: string[],
     value: number | string | boolean | undefined
   ) => {
-    if (!editingScenario) return;
+    if (!currentScenario) return;
     
-    const newAssumptions = { ...editingScenario.assumptions };
+    console.log('[Projections] Updating nested assumption:', path, value);
+    const newAssumptions = { ...currentScenario.assumptions };
     let current: any = newAssumptions;
     
     // Navigate to the nested object
@@ -329,16 +319,16 @@ export const Projections = () => {
       current[finalKey] = value;
     }
     
-    setEditingScenario({
-      ...editingScenario,
+    updateProjectionScenario(currentScenario.id, {
+      ...currentScenario,
       assumptions: newAssumptions,
     });
   };
 
   // Helper to get nested assumption value
   const getNestedAssumption = (path: string[]): any => {
-    if (!editingScenario) return undefined;
-    let current: any = editingScenario.assumptions;
+    if (!currentScenario) return undefined;
+    let current: any = currentScenario.assumptions;
     for (const key of path) {
       if (current === undefined || current === null) return undefined;
       current = current[key];
@@ -347,18 +337,19 @@ export const Projections = () => {
   };
 
   const handleConfigChange = (key: keyof ProjectionScenario['config'], value: number | string | boolean) => {
-    if (!editingScenario) return;
+    if (!currentScenario) return;
     
+    console.log('[Projections] Updating config:', key, value);
     // Validate projectionYears
     if (key === 'projectionYears' && typeof value === 'number') {
       if (value < 1) value = 1;
       if (value > 60) value = 60;
     }
     
-    setEditingScenario({
-      ...editingScenario,
+    updateProjectionScenario(currentScenario.id, {
+      ...currentScenario,
       config: {
-        ...editingScenario.config,
+        ...currentScenario.config,
         [key]: value,
       },
     });
@@ -411,45 +402,29 @@ export const Projections = () => {
                 ))}
               </select>
               {currentScenario && (
-                <>
-                  <button
-                    onClick={() => handleEditScenario(currentScenario)}
-                    className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg font-semibold hover:bg-blue-200 transition-all"
-                  >
-                    ✏️ Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteScenario(currentScenario.id)}
-                    className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-all"
-                  >
-                    🗑️ Delete
-                  </button>
-                </>
+                <button
+                  onClick={() => handleDeleteScenario(currentScenario.id)}
+                  className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-all"
+                >
+                  🗑️ Delete
+                </button>
               )}
             </div>
-          </div>
-
-          {/* Edit Scenario Modal */}
-          {editingScenario && (
-            <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Edit Scenario: {editingScenario.name}</h2>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {currentScenario && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-200">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Scenario Name</label>
                   <input
                     type="text"
-                    value={editingScenario.name}
-                    onChange={(e) => setEditingScenario({ ...editingScenario, name: e.target.value })}
+                    value={currentScenario.name}
+                    onChange={(e) => updateProjectionScenario(currentScenario.id, { ...currentScenario, name: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Projection Years</label>
                   <select
-                    value={editingScenario.config.projectionYears}
+                    value={currentScenario.config.projectionYears}
                     onChange={(e) => handleConfigChange('projectionYears', parseInt(e.target.value))}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
@@ -469,10 +444,74 @@ export const Projections = () => {
                   </select>
                 </div>
               </div>
+            )}
+          </div>
 
+          {/* Projection Chart */}
+          {projectionResult && currentScenario && (
+            <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Net Worth Projection</h2>
+              <NetWorthProjectionChart 
+                result={projectionResult} 
+                scenario={currentScenario}
+                onMilestoneClick={scrollToSection}
+              />
+              
+              {/* Key Metrics */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600">Starting Net Worth</p>
+                  <p className="text-xl font-bold text-blue-900">
+                    ${projectionResult.summary.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div className="bg-emerald-50 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600">Ending Net Worth</p>
+                  <p className="text-xl font-bold text-emerald-900">
+                    ${projectionResult.summary.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600">Total Growth</p>
+                  <p className="text-xl font-bold text-purple-900">
+                    ${projectionResult.summary.totalGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div className="bg-orange-50 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600">Avg Annual Growth</p>
+                  <p className="text-xl font-bold text-orange-900">
+                    {projectionResult.summary.averageAnnualGrowth.toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+
+              {projectionResult.summary.debtFreeDate && (
+                <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                  <p className="text-sm font-medium text-green-800">
+                    🎉 Debt-Free Date: {new Date(projectionResult.summary.debtFreeDate).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Mortgage vs Invest Comparison */}
+          {mortgageAccount && mortgageComparison && (
+            <MortgageVsInvestComparison
+              mortgage={mortgageAccount}
+              comparison={mortgageComparison}
+              monthlySurplus={monthlySurplus}
+            />
+          )}
+
+          {/* Projection Inputs - Always Visible */}
+          {currentScenario && (
+            <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Scenario Settings</h2>
               <div className="space-y-4">
                 {/* Income & Employment */}
                 <ProjectionInputSection
+                  id="income-employment"
                   title="Income & Employment"
                   defaultExpanded={true}
                   helpText="Current income breakdown and salary growth assumptions"
@@ -500,14 +539,14 @@ export const Projections = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Salary Growth Rate: {(editingScenario.assumptions.salaryGrowthRate * 100).toFixed(1)}%
+                            Salary Growth Rate: {(currentScenario.assumptions.salaryGrowthRate * 100).toFixed(1)}%
                   </label>
                           <input
                             type="range"
                             min="0"
                             max="0.10"
                             step="0.001"
-                            value={editingScenario.assumptions.salaryGrowthRate}
+                            value={currentScenario.assumptions.salaryGrowthRate}
                             onChange={(e) => handleAssumptionChange('salaryGrowthRate', parseFloat(e.target.value))}
                             className="w-full"
                           />
@@ -518,6 +557,7 @@ export const Projections = () => {
 
                 {/* Investments */}
                 <ProjectionInputSection
+                  id="investments"
                   title="Investments"
                   defaultExpanded={true}
                   helpText="Global investment return assumptions and per-account/holding overrides"
@@ -526,14 +566,14 @@ export const Projections = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Total Investment Return: {((editingScenario.assumptions.investmentGrowthRate ?? 0) + (editingScenario.assumptions.investmentDividendYield ?? 0) || editingScenario.assumptions.investmentReturnRate * 100).toFixed(1)}%
+                          Total Investment Return: {((currentScenario.assumptions.investmentGrowthRate ?? 0) + (currentScenario.assumptions.investmentDividendYield ?? 0) || currentScenario.assumptions.investmentReturnRate * 100).toFixed(1)}%
                         </label>
                         <input
                           type="range"
                           min="0"
                           max="0.15"
                           step="0.001"
-                          value={editingScenario.assumptions.investmentReturnRate}
+                          value={currentScenario.assumptions.investmentReturnRate}
                           onChange={(e) => handleAssumptionChange('investmentReturnRate', parseFloat(e.target.value))}
                           className="w-full"
                         />
@@ -541,14 +581,14 @@ export const Projections = () => {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Inflation Rate: {(editingScenario.assumptions.inflationRate * 100).toFixed(1)}%
+                          Inflation Rate: {(currentScenario.assumptions.inflationRate * 100).toFixed(1)}%
                         </label>
                         <input
                           type="range"
                           min="0"
                           max="0.05"
                           step="0.001"
-                          value={editingScenario.assumptions.inflationRate}
+                          value={currentScenario.assumptions.inflationRate}
                           onChange={(e) => handleAssumptionChange('inflationRate', parseFloat(e.target.value))}
                           className="w-full"
                         />
@@ -557,14 +597,14 @@ export const Projections = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Investment Growth Rate: {((editingScenario.assumptions.investmentGrowthRate ?? editingScenario.assumptions.investmentReturnRate * 0.7) * 100).toFixed(1)}%
+                          Investment Growth Rate: {((currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7) * 100).toFixed(1)}%
                         </label>
                         <input
                           type="range"
                           min="0"
                           max="0.12"
                           step="0.001"
-                          value={editingScenario.assumptions.investmentGrowthRate ?? editingScenario.assumptions.investmentReturnRate * 0.7}
+                          value={currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7}
                           onChange={(e) => handleAssumptionChange('investmentGrowthRate', parseFloat(e.target.value))}
                           className="w-full"
                         />
@@ -572,14 +612,14 @@ export const Projections = () => {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Dividend Yield: {((editingScenario.assumptions.investmentDividendYield ?? editingScenario.assumptions.investmentReturnRate * 0.3) * 100).toFixed(1)}%
+                          Dividend Yield: {((currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3) * 100).toFixed(1)}%
                         </label>
                         <input
                           type="range"
                           min="0"
                           max="0.08"
                           step="0.001"
-                          value={editingScenario.assumptions.investmentDividendYield ?? editingScenario.assumptions.investmentReturnRate * 0.3}
+                          value={currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3}
                           onChange={(e) => handleAssumptionChange('investmentDividendYield', parseFloat(e.target.value))}
                           className="w-full"
                         />
@@ -591,6 +631,7 @@ export const Projections = () => {
 
                 {/* Government Benefits */}
                 <ProjectionInputSection
+                      id="government-benefits"
                       title="Government Benefits (CPP/QPP & OAS)"
                       defaultExpanded={false}
                       helpText="Canada Pension Plan and Old Age Security benefit calculations"
@@ -900,6 +941,7 @@ export const Projections = () => {
 
                 {/* Account Contributions */}
                 <ProjectionInputSection
+                      id="account-contributions"
                       title="Account Contributions"
                       defaultExpanded={false}
                       helpText="RRSP, TFSA, and RESP contribution room tracking"
@@ -986,6 +1028,7 @@ export const Projections = () => {
 
                 {/* Retirement Planning */}
                 <ProjectionInputSection
+                      id="retirement-planning"
                       title="Retirement Planning"
                       defaultExpanded={false}
                       helpText="Comprehensive retirement planning including withdrawal strategies and healthcare costs"
@@ -1000,7 +1043,7 @@ export const Projections = () => {
                               type="number"
                               min="50"
                               max="75"
-                              value={editingScenario.assumptions.retirement?.targetRetirementAge || editingScenario.assumptions.targetRetirementAge || 65}
+                              value={currentScenario.assumptions.retirement?.targetRetirementAge || currentScenario.assumptions.targetRetirementAge || 65}
                               onChange={(e) => {
                                 const age = e.target.value ? parseInt(e.target.value) : undefined;
                                 if (age) {
@@ -1019,7 +1062,7 @@ export const Projections = () => {
                               type="number"
                               min="50"
                               max="75"
-                              value={editingScenario.assumptions.retirement?.targetRetirementAge2 || ''}
+                              value={currentScenario.assumptions.retirement?.targetRetirementAge2 || ''}
                               onChange={(e) => {
                                 const age = e.target.value ? parseInt(e.target.value) : undefined;
                                 handleNestedAssumptionChange(['retirement', 'targetRetirementAge2'], age);
@@ -1031,14 +1074,14 @@ export const Projections = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Retirement Expense Ratio: {((editingScenario.assumptions.retirement?.retirementExpenseRatio || editingScenario.assumptions.retirementExpenseRatio || 0.70) * 100).toFixed(0)}%
+                              Retirement Expense Ratio: {((currentScenario.assumptions.retirement?.retirementExpenseRatio || currentScenario.assumptions.retirementExpenseRatio || 0.70) * 100).toFixed(0)}%
                             </label>
                             <input
                               type="range"
                               min="0.60"
                               max="1.00"
                               step="0.01"
-                              value={editingScenario.assumptions.retirement?.retirementExpenseRatio || editingScenario.assumptions.retirementExpenseRatio || 0.70}
+                              value={currentScenario.assumptions.retirement?.retirementExpenseRatio || currentScenario.assumptions.retirementExpenseRatio || 0.70}
                               onChange={(e) => {
                                 const ratio = parseFloat(e.target.value);
                                 handleNestedAssumptionChange(['retirement', 'retirementExpenseRatio'], ratio);
@@ -1050,14 +1093,14 @@ export const Projections = () => {
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Withdrawal Rate: {((editingScenario.assumptions.retirement?.withdrawalRate || editingScenario.assumptions.withdrawalRate || 0.04) * 100).toFixed(1)}%
+                              Withdrawal Rate: {((currentScenario.assumptions.retirement?.withdrawalRate || currentScenario.assumptions.withdrawalRate || 0.04) * 100).toFixed(1)}%
                             </label>
                             <input
                               type="range"
                               min="0.02"
                               max="0.06"
                               step="0.001"
-                              value={editingScenario.assumptions.retirement?.withdrawalRate || editingScenario.assumptions.withdrawalRate || 0.04}
+                              value={currentScenario.assumptions.retirement?.withdrawalRate || currentScenario.assumptions.withdrawalRate || 0.04}
                               onChange={(e) => {
                                 const rate = parseFloat(e.target.value);
                                 handleNestedAssumptionChange(['retirement', 'withdrawalRate'], rate);
@@ -1073,7 +1116,7 @@ export const Projections = () => {
                             Withdrawal Strategy
                           </label>
                           <select
-                            value={editingScenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized'}
+                            value={currentScenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized'}
                             onChange={(e) => handleNestedAssumptionChange(['retirement', 'withdrawalStrategy'], e.target.value)}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
@@ -1093,7 +1136,7 @@ export const Projections = () => {
                               type="number"
                               min="0"
                               step="100"
-                              value={editingScenario.assumptions.retirement?.healthcareCosts || ''}
+                              value={currentScenario.assumptions.retirement?.healthcareCosts || ''}
                               onChange={(e) => {
                                 const val = e.target.value ? parseFloat(e.target.value) : undefined;
                                 handleNestedAssumptionChange(['retirement', 'healthcareCosts'], val);
@@ -1110,7 +1153,7 @@ export const Projections = () => {
                               type="number"
                               min="0"
                               step="1000"
-                              value={editingScenario.assumptions.retirement?.longTermCareCosts || ''}
+                              value={currentScenario.assumptions.retirement?.longTermCareCosts || ''}
                               onChange={(e) => {
                                 const val = e.target.value ? parseFloat(e.target.value) : undefined;
                                 handleNestedAssumptionChange(['retirement', 'longTermCareCosts'], val);
@@ -1124,7 +1167,7 @@ export const Projections = () => {
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
-                              checked={editingScenario.assumptions.retirement?.oasClawbackPlanning || false}
+                              checked={currentScenario.assumptions.retirement?.oasClawbackPlanning || false}
                               onChange={(e) => handleNestedAssumptionChange(['retirement', 'oasClawbackPlanning'], e.target.checked)}
                               className="rounded border-gray-300"
                             />
@@ -1133,7 +1176,7 @@ export const Projections = () => {
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
-                              checked={editingScenario.assumptions.retirement?.taxOptimizedSequence || false}
+                              checked={currentScenario.assumptions.retirement?.taxOptimizedSequence || false}
                               onChange={(e) => handleNestedAssumptionChange(['retirement', 'taxOptimizedSequence'], e.target.checked)}
                               className="rounded border-gray-300"
                             />
@@ -1146,6 +1189,7 @@ export const Projections = () => {
                 {/* RESP Planning */}
                 {hasRESPAccounts && (
                   <ProjectionInputSection
+                        id="resp-planning"
                         title="RESP Planning"
                         defaultExpanded={false}
                         helpText="Registered Education Savings Plan contribution and withdrawal planning"
@@ -1160,7 +1204,7 @@ export const Projections = () => {
                                 type="number"
                                 min="0"
                                 max="18"
-                                value={editingScenario.assumptions.resp?.beneficiaryAge || ''}
+                                value={currentScenario.assumptions.resp?.beneficiaryAge || ''}
                                 onChange={(e) => {
                                   const age = e.target.value ? parseInt(e.target.value) : undefined;
                                   handleNestedAssumptionChange(['resp', 'beneficiaryAge'], age);
@@ -1176,7 +1220,7 @@ export const Projections = () => {
                                 type="number"
                                 min="0"
                                 step="100"
-                                value={editingScenario.assumptions.resp?.annualContribution || ''}
+                                value={currentScenario.assumptions.resp?.annualContribution || ''}
                                 onChange={(e) => {
                                   const val = e.target.value ? parseFloat(e.target.value) : undefined;
                                   handleNestedAssumptionChange(['resp', 'annualContribution'], val);
@@ -1188,14 +1232,14 @@ export const Projections = () => {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
-                                CESG Matching Rate: {((editingScenario.assumptions.resp?.cesgMatch || 0.20) * 100).toFixed(0)}%
+                                CESG Matching Rate: {((currentScenario.assumptions.resp?.cesgMatch || 0.20) * 100).toFixed(0)}%
                               </label>
                               <input
                                 type="range"
                                 min="0"
                                 max="0.40"
                                 step="0.01"
-                                value={editingScenario.assumptions.resp?.cesgMatch || 0.20}
+                                value={currentScenario.assumptions.resp?.cesgMatch || 0.20}
                                 onChange={(e) => handleNestedAssumptionChange(['resp', 'cesgMatch'], parseFloat(e.target.value))}
                                 className="w-full"
                               />
@@ -1209,7 +1253,7 @@ export const Projections = () => {
                                 type="number"
                                 min={new Date().getFullYear()}
                                 max={new Date().getFullYear() + 20}
-                                value={editingScenario.assumptions.resp?.expectedEducationStart || ''}
+                                value={currentScenario.assumptions.resp?.expectedEducationStart || ''}
                                 onChange={(e) => {
                                   const year = e.target.value ? parseInt(e.target.value) : undefined;
                                   handleNestedAssumptionChange(['resp', 'expectedEducationStart'], year);
@@ -1226,7 +1270,7 @@ export const Projections = () => {
                               type="number"
                               min="0"
                               step="1000"
-                              value={editingScenario.assumptions.resp?.educationCosts || ''}
+                              value={currentScenario.assumptions.resp?.educationCosts || ''}
                               onChange={(e) => {
                                 const val = e.target.value ? parseFloat(e.target.value) : undefined;
                                 handleNestedAssumptionChange(['resp', 'educationCosts'], val);
@@ -1241,6 +1285,7 @@ export const Projections = () => {
 
                 {/* Tax Strategy */}
                 <ProjectionInputSection
+                      id="tax-strategy"
                       title="Tax Strategy"
                       defaultExpanded={false}
                       helpText="Tax assumptions and calculations for projections"
@@ -1252,7 +1297,7 @@ export const Projections = () => {
                               Province (for tax calculations)
                             </label>
                             <select
-                              value={editingScenario.assumptions.province || household?.province || ''}
+                              value={currentScenario.assumptions.province || household?.province || ''}
                               onChange={(e) => handleAssumptionChange('province', e.target.value || undefined)}
                               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
@@ -1270,7 +1315,7 @@ export const Projections = () => {
                             </label>
                             <input
                               type="number"
-                              value={editingScenario.assumptions.taxableIncome || ''}
+                              value={currentScenario.assumptions.taxableIncome || ''}
                               onChange={(e) => handleAssumptionChange('taxableIncome', e.target.value ? parseFloat(e.target.value) : undefined)}
                               placeholder="Auto-calculated from income"
                               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1293,14 +1338,14 @@ export const Projections = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Marginal Tax Rate: {((editingScenario.assumptions.marginalTaxRate ?? 0) * 100).toFixed(1)}%
+                            Marginal Tax Rate: {((currentScenario.assumptions.marginalTaxRate ?? 0) * 100).toFixed(1)}%
                           </label>
                           <input
                             type="range"
                             min="0"
                             max="0.50"
                             step="0.01"
-                            value={editingScenario.assumptions.marginalTaxRate ?? 0.30}
+                            value={currentScenario.assumptions.marginalTaxRate ?? 0.30}
                             onChange={(e) => handleAssumptionChange('marginalTaxRate', parseFloat(e.target.value))}
                             className="w-full"
                           />
@@ -1311,6 +1356,7 @@ export const Projections = () => {
 
                 {/* Holding/Account Overrides (Reversed Hierarchy) */}
                 <ProjectionInputSection
+                      id="holding-overrides"
                       title="Holding/Account Overrides"
                       defaultExpanded={false}
                       helpText="Configure investment rates for specific holdings across all accounts"
@@ -1363,7 +1409,7 @@ export const Projections = () => {
                       <div className="space-y-4 pt-4 border-t border-blue-300">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Growth Rate: {((selectedHoldingInstance?.holding?.growthRate ?? editingScenario.assumptions.investmentGrowthRate ?? editingScenario.assumptions.investmentReturnRate * 0.7) * 100).toFixed(2)}%
+                            Growth Rate: {((selectedHoldingInstance?.holding?.growthRate ?? currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7) * 100).toFixed(2)}%
                           </label>
                           <div className="flex gap-2">
                             <input
@@ -1434,7 +1480,7 @@ export const Projections = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Dividend Yield: {((selectedHoldingInstance?.holding?.dividendYield ?? editingScenario.assumptions.investmentDividendYield ?? editingScenario.assumptions.investmentReturnRate * 0.3) * 100).toFixed(2)}%
+                            Dividend Yield: {((selectedHoldingInstance?.holding?.dividendYield ?? currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3) * 100).toFixed(2)}%
                           </label>
                           <input
                             type="number"
@@ -1482,75 +1528,7 @@ export const Projections = () => {
                 </div>
                 </ProjectionInputSection>
               </div>
-
-              <div className="flex gap-4 mt-6">
-                <button
-                  onClick={handleSaveScenario}
-                  className="px-6 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-all"
-                >
-                  Save Scenario
-                </button>
-                <button
-                  onClick={() => setEditingScenario(null)}
-                  className="px-6 py-2 bg-gray-300 text-gray-800 rounded-lg font-semibold hover:bg-gray-400 transition-all"
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
-          )}
-
-          {/* Projection Chart */}
-          {projectionResult && (
-            <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Net Worth Projection</h2>
-              <NetWorthProjectionChart result={projectionResult} />
-              
-              {/* Key Metrics */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Starting Net Worth</p>
-                  <p className="text-xl font-bold text-blue-900">
-                    ${projectionResult.summary.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="bg-emerald-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Ending Net Worth</p>
-                  <p className="text-xl font-bold text-emerald-900">
-                    ${projectionResult.summary.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Total Growth</p>
-                  <p className="text-xl font-bold text-purple-900">
-                    ${projectionResult.summary.totalGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="bg-orange-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">Avg Annual Growth</p>
-                  <p className="text-xl font-bold text-orange-900">
-                    {projectionResult.summary.averageAnnualGrowth.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
-
-              {projectionResult.summary.debtFreeDate && (
-                <div className="mt-4 p-4 bg-green-50 rounded-lg">
-                  <p className="text-sm font-medium text-green-800">
-                    🎉 Debt-Free Date: {new Date(projectionResult.summary.debtFreeDate).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Mortgage vs Invest Comparison */}
-          {mortgageAccount && mortgageComparison && (
-            <MortgageVsInvestComparison
-              mortgage={mortgageAccount}
-              comparison={mortgageComparison}
-              monthlySurplus={monthlySurplus}
-            />
           )}
 
           {/* Year-by-Year Breakdown */}

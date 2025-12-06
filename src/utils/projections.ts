@@ -58,8 +58,6 @@ export function projectNetWorth(
   
   console.log('[projections] Starting net worth:', startingNetWorth);
   console.log('[projections] Monthly income:', avgMonthlyIncome, 'expenses:', avgMonthlyExpenses, 'savings:', monthlySavings);
-  console.log('[projections] Projection years:', scenario.config.projectionYears, 'total months:', totalMonths);
-  console.log('[projections] Investment accounts:', investmentAccounts.length, 'total balance:', investmentBalance);
   
   // 2. Initialize projection state (clone accounts to avoid mutating originals)
   let currentAssets = accounts
@@ -72,12 +70,27 @@ export function projectNetWorth(
   const monthlyData: ProjectionMonth[] = [];
   const totalMonths = scenario.config.projectionYears * 12;
   
+  // Get initial investment accounts for logging (before loop)
+  const initialInvestmentAccounts = currentAssets.filter(a => 
+    ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(a.type)
+  );
+  const initialInvestmentBalance = initialInvestmentAccounts.reduce((sum, a) => sum + a.balance, 0);
+  
+  console.log('[projections] Projection years:', scenario.config.projectionYears, 'total months:', totalMonths);
+  console.log('[projections] Investment accounts:', initialInvestmentAccounts.length, 'total balance:', initialInvestmentBalance);
+  
   // 3. Project month by month
   for (let month = 0; month < totalMonths; month++) {
     const date = addMonths(scenario.config.startDate, month);
     const year = getYear(date);
     const monthNum = getMonth(date);
     const dateStr = formatDate(date);
+    
+    // Get investment accounts and balance for this month (needed for retirement calculations)
+    const investmentAccounts = currentAssets.filter(a => 
+      ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(a.type)
+    );
+    const investmentBalance = investmentAccounts.reduce((sum, a) => sum + a.balance, 0);
     
     // Apply inflation to expenses
     const yearsElapsed = month / 12;
@@ -216,10 +229,7 @@ export function projectNetWorth(
     });
     
     // Apply investment growth to investment accounts (tax-aware)
-    const investmentAccounts = currentAssets.filter(a => 
-      ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(a.type)
-    );
-    const investmentBalance = investmentAccounts.reduce((sum, a) => sum + a.balance, 0);
+    // Note: investmentAccounts and investmentBalance are already calculated above
     
     // Calculate taxable income for tax calculations (simplified: use grown income)
     const taxableIncome = grownIncome * 12; // Annual taxable income
@@ -602,7 +612,11 @@ function calculateSummary(
   const endingNetWorth = monthlyData[monthlyData.length - 1].netWorth;
   const totalGrowth = endingNetWorth - startingNetWorth;
   const years = monthlyData.length / 12;
-  const averageAnnualGrowth = years > 0 ? (totalGrowth / startingNetWorth / years) * 100 : 0;
+  // Calculate Compound Annual Growth Rate (CAGR) - the correct way to measure average annual growth
+  // CAGR = ((Ending / Starting) ^ (1/years) - 1) * 100
+  const averageAnnualGrowth = years > 0 && startingNetWorth > 0 
+    ? (Math.pow(endingNetWorth / startingNetWorth, 1 / years) - 1) * 100 
+    : 0;
   
   // Find peak net worth
   let peakNetWorth = startingNetWorth;

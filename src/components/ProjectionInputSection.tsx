@@ -6,6 +6,7 @@ interface ProjectionInputSectionProps {
   defaultExpanded?: boolean;
   helpText?: string;
   className?: string;
+  id?: string;
 }
 
 export const ProjectionInputSection = ({
@@ -14,11 +15,12 @@ export const ProjectionInputSection = ({
   defaultExpanded = false,
   helpText,
   className = '',
+  id,
 }: ProjectionInputSectionProps) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   return (
-    <div className={`bg-white rounded-lg border border-gray-200 ${className}`}>
+    <div id={id} className={`bg-white rounded-lg border border-gray-200 scroll-mt-4 ${className}`}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"

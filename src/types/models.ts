@@ -1,10 +1,21 @@
 // Core data models for Grouse personal finance app
 
+export type PersonProfile = {
+  nickname?: string; // Display name (e.g., "John", "Sarah")
+  age?: number; // Current age
+  annualIncome?: number; // Annual income in CAD
+};
+
 export type Household = {
   id: string;
   name: string;
   province?: 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'NT' | 'NU' | 'ON' | 'PE' | 'QC' | 'SK' | 'YT'; // Canadian province/territory
   owners?: string[]; // List of owners/people (e.g., ["Person 1", "Person 2", "Joint"])
+  financialIndependenceYears?: number; // Target years of expenses for financial independence
+  personProfiles?: {
+    person1?: PersonProfile;
+    person2?: PersonProfile;
+  };
 };
 
 export type Holding = {

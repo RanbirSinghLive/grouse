@@ -34,8 +34,8 @@ interface HouseholdStore {
   updateHolding: (accountId: string, holdingId: string, updates: Partial<Holding>) => void;
   deleteHolding: (accountId: string, holdingId: string) => void;
   recalculateAccountBalance: (accountId: string) => void;
-  refreshHoldingPrices: (accountId: string, onProgress?: (current: number, total: number, ticker: string) => void) => Promise<void>;
-  refreshAllHoldingPrices: (onProgress?: (current: number, total: number, ticker: string) => void) => Promise<void>;
+  refreshHoldingPrices: (accountId: string, onProgress?: (current: number, total: number, ticker: string) => void, bypassCache?: boolean) => Promise<void>;
+  refreshAllHoldingPrices: (onProgress?: (current: number, total: number, ticker: string) => void, bypassCache?: boolean) => Promise<void>;
   // Import actions
   addTransactions: (transactions: Transaction[]) => void;
   updateTransaction: (id: string, updates: Partial<Transaction>) => void;
@@ -328,8 +328,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       persist();
     },
 
-    refreshHoldingPrices: async (accountId, onProgress) => {
-      console.log('[store] refreshHoldingPrices:', accountId);
+    refreshHoldingPrices: async (accountId, onProgress, bypassCache = false) => {
+      console.log('[store] refreshHoldingPrices:', accountId, 'bypassCache:', bypassCache);
       const state = get();
       const account = state.accounts.find(a => a.id === accountId);
 
@@ -342,7 +342,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       console.log('[store] Fetching prices for tickers:', tickers);
 
       try {
-        const priceData = await fetchPrices(tickers, onProgress);
+        const priceData = await fetchPrices(tickers, onProgress, bypassCache);
         console.log('[store] Received price data:', priceData);
 
         const errors: string[] = []; // Collect errors here
@@ -398,8 +398,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       }
     },
 
-    refreshAllHoldingPrices: async (onProgress) => {
-      console.log('[store] refreshAllHoldingPrices: Refreshing prices for all accounts');
+    refreshAllHoldingPrices: async (onProgress, bypassCache = true) => {
+      console.log('[store] refreshAllHoldingPrices: Refreshing prices for all accounts, bypassCache:', bypassCache);
       const state = get();
       
       // Collect all unique tickers from all accounts with holdings
@@ -431,7 +431,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       }
 
       try {
-        const priceData = await fetchPrices(uniqueTickers, onProgress);
+        const priceData = await fetchPrices(uniqueTickers, onProgress, bypassCache);
         console.log('[store] Received price data for all holdings:', priceData);
 
         const errors: string[] = [];
@@ -448,6 +448,13 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
                     errors.push(`${holding.ticker}: ${priceInfo.error}`);
                     return holding; // Keep existing price if API error
                   }
+                  const oldPrice = holding.currentPrice;
+                  const newPrice = priceInfo.price;
+                  if (oldPrice !== newPrice) {
+                    console.log(`[store] Price updated for ${holding.ticker} in ${acc.name}: $${oldPrice.toFixed(2)} -> $${newPrice.toFixed(2)}`);
+                  } else {
+                    console.log(`[store] Price unchanged for ${holding.ticker} in ${acc.name}: $${newPrice.toFixed(2)}`);
+                  }
                   return {
                     ...holding,
                     currentPrice: priceInfo.price,
@@ -462,6 +469,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
                 0
               );
 
+              console.log(`[store] Updated account ${acc.name}: balance ${acc.balance.toFixed(2)} -> ${balance.toFixed(2)} (${updatedHoldings.length} holdings)`);
+
               return {
                 ...acc,
                 holdings: updatedHoldings,
@@ -472,6 +481,14 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
             return acc;
           }),
         }));
+        
+        // Log total net worth change
+        const newState = get();
+        const totalBalance = newState.accounts
+          .filter(a => a.kind === 'asset' && a.useHoldings)
+          .reduce((sum, a) => sum + a.balance, 0);
+        console.log(`[store] Total investment account balance after refresh: $${totalBalance.toFixed(2)}`);
+        
         persist();
 
         // Throw error if any tickers failed
@@ -633,6 +650,14 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       const defaultHousehold: Household = {
         id: generateId(),
         name: 'My Household',
+        financialIndependenceYears: 25,
+        personProfiles: {
+          person1: {
+            nickname: undefined,
+            age: undefined,
+            annualIncome: undefined,
+          },
+        },
       };
       set({
         household: defaultHousehold,
