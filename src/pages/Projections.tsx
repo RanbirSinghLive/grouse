@@ -1,12 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { projectNetWorth, createDefaultScenario } from '../utils/projections';
-import type { ProjectionScenario, ProjectionResult, Account, Holding } from '../types/models';
+import type { ProjectionScenario, ProjectionResult } from '../types/models';
 import { NetWorthProjectionChart } from '../components/NetWorthProjectionChart';
-import { getAllProvinces, getProvinceName, type Province } from '../utils/canadianTaxRates';
+import { getAllProvinces, getProvinceName } from '../utils/canadianTaxRates';
 import { calcMonthlyIncomeFromTransactions, calcMonthlyExpensesFromTransactions } from '../utils/calculations';
-import { fetchHistoricalReturns } from '../utils/stockApi';
-import { isInvestmentAccount } from '../types/models';
 import { ProjectionInputSection } from '../components/ProjectionInputSection';
 import { PersonInputGroup } from '../components/PersonInputGroup';
 import { ContributionRoomInput } from '../components/ContributionRoomInput';
@@ -22,8 +20,6 @@ export const Projections = () => {
     addProjectionScenario,
     updateProjectionScenario,
     deleteProjectionScenario,
-    updateHolding,
-    updateAccount,
   } = useHouseholdStore();
 
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
@@ -37,17 +33,6 @@ export const Projections = () => {
   // Panel visibility state
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
-  // Investment rate configuration state (reversed hierarchy: holding first)
-  const [selectedHoldingTicker, setSelectedHoldingTicker] = useState<string | null>(null);
-  const [fetchingRates, setFetchingRates] = useState(false);
-  const [fetchedRates, setFetchedRates] = useState<{ 
-    growthRate?: number; 
-    dividendYield?: number; 
-    yearsOfData?: number;
-    monthsOfData?: number;
-    dataQuality?: 'reliable' | 'limited' | 'insufficient';
-    warning?: string;
-  } | null>(null);
 
   // Get or create default scenario
   const currentScenario = useMemo(() => {
@@ -143,101 +128,8 @@ export const Projections = () => {
     return accounts.some(acc => acc.type === 'resp');
   }, [accounts]);
 
-  // Get investment accounts
-  const investmentAccounts = useMemo(() => {
-    return accounts.filter(a => a.kind === 'asset' && isInvestmentAccount(a.type));
-  }, [accounts]);
 
-  // Get all unique holdings (tickers) across all investment accounts
-  const allHoldings = useMemo(() => {
-    const tickerSet = new Set<string>();
-    investmentAccounts.forEach(acc => {
-      acc.holdings?.forEach(holding => {
-        if (holding.ticker && holding.ticker !== 'CASH') {
-          tickerSet.add(holding.ticker);
-        }
-      });
-    });
-    return Array.from(tickerSet).sort();
-  }, [investmentAccounts]);
 
-  // Get all accounts that contain the selected holding ticker
-  const accountsWithSelectedHolding = useMemo(() => {
-    if (!selectedHoldingTicker) return [];
-    return investmentAccounts.filter(acc => 
-      acc.holdings?.some(h => h.ticker === selectedHoldingTicker)
-    );
-  }, [selectedHoldingTicker, investmentAccounts]);
-
-  // Get first instance of selected holding (for display purposes - all instances should have same rates)
-  const selectedHoldingInstance = useMemo(() => {
-    if (!selectedHoldingTicker) return null;
-    for (const acc of investmentAccounts) {
-      const holding = acc.holdings?.find(h => h.ticker === selectedHoldingTicker);
-      if (holding) return { account: acc, holding };
-    }
-    return null;
-  }, [selectedHoldingTicker, investmentAccounts]);
-
-  // Handle fetching historical rates
-  const handleFetchHistoricalRates = async (forceRefresh: boolean = false) => {
-    if (!selectedHoldingTicker) {
-      alert('Please select a holding first');
-      return;
-    }
-
-    setFetchingRates(true);
-    setFetchedRates(null);
-    try {
-      // Bypass cache if force refresh is requested (to get updated calculations)
-      const historicalData = await fetchHistoricalReturns(selectedHoldingTicker, forceRefresh);
-      if (historicalData.error) {
-        alert(`Error fetching historical data: ${historicalData.error}`);
-      } else {
-        setFetchedRates({
-          growthRate: historicalData.growthRate,
-          dividendYield: historicalData.dividendYield,
-          yearsOfData: historicalData.yearsOfData,
-          monthsOfData: historicalData.monthsOfData,
-          dataQuality: historicalData.dataQuality,
-          warning: historicalData.warning,
-        });
-        
-        // Only auto-apply if data is reliable or limited (not insufficient)
-        // User can still manually apply insufficient data if they want
-        if (historicalData.dataQuality !== 'insufficient') {
-        updateHoldingRatesForAllAccounts(selectedHoldingTicker, {
-          growthRate: historicalData.growthRate,
-          dividendYield: historicalData.dividendYield,
-        });
-        } else {
-          // Show warning but don't auto-apply - user can manually apply if desired
-          console.warn(`[Projections] Insufficient data for ${selectedHoldingTicker}, rates not auto-applied`);
-        }
-      }
-    } catch (error) {
-      console.error('[Projections] Error fetching historical rates:', error);
-      alert('Failed to fetch historical rates. Please try again.');
-    } finally {
-      setFetchingRates(false);
-    }
-  };
-
-  // Update holding rates for all accounts that contain this ticker
-  const updateHoldingRatesForAllAccounts = (ticker: string, rates: { growthRate?: number; dividendYield?: number; dividendType?: Holding['dividendType'] }) => {
-    investmentAccounts.forEach(acc => {
-      acc.holdings?.forEach(holding => {
-        if (holding.ticker === ticker) {
-          updateHolding(acc.id, holding.id, rates);
-        }
-      });
-    });
-  };
-
-  // Update account rates
-  const updateAccountRates = (accountId: string, rates: { investmentGrowthRate?: number; investmentDividendYield?: number }) => {
-    updateAccount(accountId, rates);
-  };
 
   const handleCreateScenario = () => {
     if (!household) {
@@ -1834,179 +1726,6 @@ export const Projections = () => {
                       </div>
                 </ProjectionInputSection>
 
-                {/* Holding/Account Overrides (Reversed Hierarchy) */}
-                <ProjectionInputSection
-                      id="holding-overrides"
-                      title="Holding/Account Overrides"
-                      defaultExpanded={false}
-                      helpText="Configure investment rates for specific holdings across all accounts"
-                    >
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Select Holding
-                    </label>
-                    <select
-                      value={selectedHoldingTicker || ''}
-                      onChange={(e) => {
-                        setSelectedHoldingTicker(e.target.value || null);
-                        setFetchedRates(null);
-                      }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select a holding...</option>
-                      {allHoldings.map(ticker => (
-                        <option key={ticker} value={ticker}>
-                          {ticker}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Configure rates once for this holding across all accounts
-                    </p>
-                  </div>
-
-                  {selectedHoldingTicker && accountsWithSelectedHolding.length > 0 && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Accounts containing {selectedHoldingTicker}:
-                        </label>
-                        <div className="bg-white p-3 rounded-lg border border-gray-300">
-                          <ul className="space-y-1">
-                            {accountsWithSelectedHolding.map(acc => {
-                              const holding = acc.holdings?.find(h => h.ticker === selectedHoldingTicker);
-                              return (
-                                <li key={acc.id} className="text-sm text-gray-700">
-                                  • {acc.name} ({acc.type}) - {holding?.shares.toLocaleString('en-CA', { maximumFractionDigits: 4 })} shares
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 pt-4 border-t border-blue-300">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Growth Rate: {((selectedHoldingInstance?.holding?.growthRate ?? currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7) * 100).toFixed(2)}%
-                          </label>
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              step="0.001"
-                              min="0"
-                              max="0.15"
-                              value={selectedHoldingInstance?.holding?.growthRate ?? ''}
-                              onChange={(e) => {
-                                const value = e.target.value ? parseFloat(e.target.value) : undefined;
-                                if (selectedHoldingTicker) {
-                                  updateHoldingRatesForAllAccounts(selectedHoldingTicker, { growthRate: value });
-                                }
-                              }}
-                              placeholder="Auto from scenario"
-                              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <button
-                                    onClick={() => handleFetchHistoricalRates(true)}
-                              disabled={fetchingRates}
-                              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all"
-                                    title="Fetch fresh data (bypasses cache to use improved bond ETF distribution calculation)"
-                            >
-                              {fetchingRates ? 'Fetching...' : 'Fetch Historical'}
-                            </button>
-                          </div>
-                          {fetchedRates && (
-                                  <div className="mt-1">
-                                    <p className={`text-xs font-mono ${
-                                      fetchedRates.dataQuality === 'reliable' ? 'text-gray-600' :
-                                      fetchedRates.dataQuality === 'limited' ? 'text-yellow-600' :
-                                      'text-red-600'
-                                    }`}>
-                                      Fetched: {((fetchedRates.growthRate ?? 0) * 100).toFixed(2)}% growth, {((fetchedRates.dividendYield ?? 0) * 100).toFixed(2)}% yield
-                                      {fetchedRates.monthsOfData ? ` (${fetchedRates.monthsOfData} month${fetchedRates.monthsOfData !== 1 ? 's' : ''}, ${fetchedRates.yearsOfData?.toFixed(1)} years)` : ` (${fetchedRates.yearsOfData} years)`}
-                                      {fetchedRates.dataQuality === 'limited' && ' ⚠️ Limited data'}
-                                      {fetchedRates.dataQuality === 'insufficient' && ' ❌ Insufficient data'}
-                                    </p>
-                                    {fetchedRates.warning && (
-                                      <div className="text-xs mt-1">
-                                        <p className={`p-2 rounded border ${
-                                          fetchedRates.dataQuality === 'limited' 
-                                            ? 'text-yellow-700 bg-yellow-50 border-yellow-200' 
-                                            : 'text-red-700 bg-red-50 border-red-200'
-                                        }`}>
-                                          ⚠️ {fetchedRates.warning}
-                                        </p>
-                                        {fetchedRates.dataQuality === 'insufficient' && (
-                                          <button
-                                            onClick={() => {
-                                              if (selectedHoldingTicker && fetchedRates.growthRate !== undefined && fetchedRates.dividendYield !== undefined) {
-                                                updateHoldingRatesForAllAccounts(selectedHoldingTicker, {
-                                                  growthRate: fetchedRates.growthRate,
-                                                  dividendYield: fetchedRates.dividendYield,
-                                                });
-                                                alert('Rates applied manually. Note: These rates are based on insufficient data and may not be reliable for projections.');
-                                              }
-                                            }}
-                                            className="mt-2 px-3 py-1 text-xs bg-yellow-100 text-yellow-800 border border-yellow-300 rounded hover:bg-yellow-200 transition-colors"
-                                          >
-                                            Apply Anyway (Not Recommended)
-                                          </button>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                          )}
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Dividend Yield: {((selectedHoldingInstance?.holding?.dividendYield ?? currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3) * 100).toFixed(2)}%
-                          </label>
-                          <input
-                            type="number"
-                            step="0.001"
-                            min="0"
-                            max="0.15"
-                            value={selectedHoldingInstance?.holding?.dividendYield ?? ''}
-                            onChange={(e) => {
-                              const value = e.target.value ? parseFloat(e.target.value) : undefined;
-                              if (selectedHoldingTicker) {
-                                updateHoldingRatesForAllAccounts(selectedHoldingTicker, { dividendYield: value });
-                              }
-                            }}
-                            placeholder="Auto from scenario"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Dividend Type
-                          </label>
-                          <select
-                            value={selectedHoldingInstance?.holding?.dividendType || 'canadian_eligible'}
-                            onChange={(e) => {
-                              if (selectedHoldingTicker) {
-                                updateHoldingRatesForAllAccounts(selectedHoldingTicker, { 
-                                  dividendType: e.target.value as Holding['dividendType'] 
-                                });
-                              }
-                            }}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="canadian_eligible">Canadian Eligible</option>
-                            <option value="canadian_non_eligible">Canadian Non-Eligible</option>
-                            <option value="foreign">Foreign</option>
-                            <option value="none">None</option>
-                          </select>
-                        </div>
-                        <p className="text-xs text-gray-500 italic">
-                          Note: Changes apply to all accounts containing this holding
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
-                </ProjectionInputSection>
                     </div>
                   )}
                 </div>

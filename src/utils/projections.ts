@@ -15,6 +15,7 @@ import { calcNetWorth, calcMonthlyIncomeFromTransactions, calcMonthlyExpensesFro
 import {
   getHoldingReturnRates,
   calculateInvestmentReturn,
+  calculateInvestmentReturnAnnual,
   calculateAfterTaxReturn,
   getMarginalTaxRate,
 } from './taxCalculations';
@@ -123,9 +124,9 @@ export function projectNetWorth(
     );
     const investmentBalance = investmentAccounts.reduce((sum, a) => sum + a.balance, 0);
     
-    // Apply inflation to expenses
-    const yearsElapsed = month / 12;
-    let inflatedExpenses = baseMonthlyExpenses * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
+    // Apply inflation to expenses (once per year, not continuously)
+    const yearsIntoProjection = Math.floor(month / 12);
+    let inflatedExpenses = baseMonthlyExpenses * Math.pow(1 + scenario.assumptions.inflationRate, yearsIntoProjection);
     
     // Determine if we're in retirement
     const targetRetirementAge = scenario.assumptions.retirement?.targetRetirementAge || scenario.assumptions.targetRetirementAge;
@@ -143,7 +144,7 @@ export function projectNetWorth(
     if (isRetired) {
       // In retirement: use retirement expense ratio for expenses, and add government benefits
       const retirementExpenseRatio = scenario.assumptions.retirement?.retirementExpenseRatio || scenario.assumptions.retirementExpenseRatio || 0.70;
-      inflatedExpenses = baseMonthlyExpenses * retirementExpenseRatio * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
+      inflatedExpenses = baseMonthlyExpenses * retirementExpenseRatio * Math.pow(1 + scenario.assumptions.inflationRate, yearsIntoProjection);
       
       // Add CPP benefits
       let cppIncome = 0;
@@ -223,7 +224,7 @@ export function projectNetWorth(
         inflatedExpenses += scenario.assumptions.retirement.longTermCareCosts / 12;
       }
     } else {
-      // Not retired: use salary growth
+      // Not retired: use salary growth (once per year, not continuously)
       // Check for per-person salary growth rates, otherwise use global rate
       const person1SalaryGrowthRate = scenario.assumptions.income?.person1?.salaryGrowthRate ?? scenario.assumptions.salaryGrowthRate;
       const person2SalaryGrowthRate = scenario.assumptions.income?.person2?.salaryGrowthRate ?? scenario.assumptions.salaryGrowthRate;
@@ -234,27 +235,27 @@ export function projectNetWorth(
       
       if (person1AnnualIncome !== undefined) {
         // Person 1 has manual input - use it with their growth rate
-        person1MonthlyIncome = (person1AnnualIncome / 12) * Math.pow(1 + person1SalaryGrowthRate, yearsElapsed);
+        person1MonthlyIncome = (person1AnnualIncome / 12) * Math.pow(1 + person1SalaryGrowthRate, yearsIntoProjection);
       } else {
         // Person 1 uses transaction-based (or portion of it if person 2 has manual input)
         if (person2AnnualIncome !== undefined) {
           // Person 2 has manual input, so person 1 gets the transaction-based amount
-          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsElapsed);
+          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsIntoProjection);
         } else {
           // Neither has manual input, use all transaction-based income for person 1
-          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsElapsed);
+          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsIntoProjection);
         }
       }
       
       if (person2AnnualIncome !== undefined) {
         // Person 2 has manual input - use it with their growth rate
-        person2MonthlyIncome = (person2AnnualIncome / 12) * Math.pow(1 + person2SalaryGrowthRate, yearsElapsed);
+        person2MonthlyIncome = (person2AnnualIncome / 12) * Math.pow(1 + person2SalaryGrowthRate, yearsIntoProjection);
       }
       // If person 2 doesn't have manual input, person2MonthlyIncome stays 0 (all income goes to person 1)
       
       grownIncome = person1MonthlyIncome + person2MonthlyIncome;
       
-      console.log('[projections] Month', month, '- Person 1 income:', person1MonthlyIncome, 'Person 2 income:', person2MonthlyIncome, 'Total:', grownIncome);
+      console.log('[projections] Month', month, 'Years into projection:', yearsIntoProjection, '- Person 1 income:', person1MonthlyIncome, 'Person 2 income:', person2MonthlyIncome, 'Total:', grownIncome);
     }
     
     // Calculate savings
@@ -342,40 +343,47 @@ export function projectNetWorth(
             (scenario.assumptions.investmentReturnRate * 0.3);
         }
         
-        // Log rates for debugging (first month only)
-        if (month === 0 && acc.name) {
-          console.log(`[projections] Account ${acc.name}: balance=${acc.balance.toFixed(2)}, growthRate=${(accountGrowthRate * 100).toFixed(2)}%, dividendYield=${(accountDividendYield * 100).toFixed(2)}%`);
+        // Apply investment returns annually (once per year at the start of each year)
+        // Only apply returns at month 0, 12, 24, 36, etc. (start of each year)
+        const isStartOfYear = (month % 12) === 0;
+        
+        if (isStartOfYear) {
+          // Log rates for debugging (first year only)
+          if (month === 0 && acc.name) {
+            console.log(`[projections] Account ${acc.name}: balance=${acc.balance.toFixed(2)}, growthRate=${(accountGrowthRate * 100).toFixed(2)}%, dividendYield=${(accountDividendYield * 100).toFixed(2)}%`);
+          }
+          
+          // Calculate investment return for this account (annual, not monthly)
+          // Use full annual rates, not divided by 12
+          const annualReturnData = calculateInvestmentReturnAnnual(acc.balance, accountGrowthRate, accountDividendYield);
+          
+          // Log first year returns for debugging
+          if (month === 0 && acc.name) {
+            console.log(`[projections] Account ${acc.name} annual return: growth=${annualReturnData.growth.toFixed(2)}, dividends=${annualReturnData.dividends.toFixed(2)}, total=${annualReturnData.total.toFixed(2)}`);
+          }
+          
+          // Calculate after-tax return (only applies to non-registered accounts)
+          const afterTaxReturn = calculateAfterTaxReturn(
+            annualReturnData,
+            acc,
+            scenario.assumptions,
+            taxableIncome
+          );
+          
+          // Update account balance with after-tax return (annual compounding)
+          const balanceBefore = acc.balance;
+          acc.balance += afterTaxReturn.totalAfterTax;
+          
+          // Log first year balance changes for debugging
+          if (month === 0 && acc.name) {
+            console.log(`[projections] Account ${acc.name}: ${balanceBefore.toFixed(2)} -> ${acc.balance.toFixed(2)} (annual change: ${afterTaxReturn.totalAfterTax.toFixed(2)})`);
+          }
+          
+          // Track totals (annual amounts, will be divided by 12 later for monthly reporting)
+          totalInvestmentGrowth += afterTaxReturn.afterTaxGrowth;
+          totalInvestmentDividends += afterTaxReturn.afterTaxDividends;
+          totalTaxPaid += afterTaxReturn.taxPaid;
         }
-        
-        // Calculate investment return for this account (monthly)
-        const returnData = calculateInvestmentReturn(acc.balance, accountGrowthRate, accountDividendYield);
-        
-        // Log first month returns for debugging
-        if (month === 0 && acc.name) {
-          console.log(`[projections] Account ${acc.name} return: growth=${returnData.growth.toFixed(2)}, dividends=${returnData.dividends.toFixed(2)}, total=${returnData.total.toFixed(2)}`);
-        }
-        
-        // Calculate after-tax return (only applies to non-registered accounts)
-        const afterTaxReturn = calculateAfterTaxReturn(
-          returnData,
-          acc,
-          scenario.assumptions,
-          taxableIncome
-        );
-        
-        // Update account balance with after-tax return (compounding)
-        const balanceBefore = acc.balance;
-        acc.balance += afterTaxReturn.totalAfterTax;
-        
-        // Log first month balance changes for debugging
-        if (month === 0 && acc.name) {
-          console.log(`[projections] Account ${acc.name}: ${balanceBefore.toFixed(2)} -> ${acc.balance.toFixed(2)} (change: ${afterTaxReturn.totalAfterTax.toFixed(2)})`);
-        }
-        
-        // Track totals
-        totalInvestmentGrowth += afterTaxReturn.afterTaxGrowth;
-        totalInvestmentDividends += afterTaxReturn.afterTaxDividends;
-        totalTaxPaid += afterTaxReturn.taxPaid;
       });
       
       // Second pass: add contributions proportionally based on updated balances
@@ -402,7 +410,9 @@ export function projectNetWorth(
       }
     }
     
-    const investmentGrowth = totalInvestmentGrowth + totalInvestmentDividends; // Total after-tax growth
+    // Investment growth only occurs once per year (at start of year), so report it only in that month
+    // For other months, investmentGrowth will be 0
+    const investmentGrowth = totalInvestmentGrowth + totalInvestmentDividends; // Annual amount, reported in the month it occurs
     
     // Handle RESP contributions and CESG grants
     if (scenario.assumptions.resp?.annualContribution && !isRetired) {

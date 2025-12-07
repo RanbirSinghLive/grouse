@@ -31,21 +31,20 @@ export function getHoldingReturnRates(
   account: Account,
   assumptions: ProjectionAssumptions
 ): { growthRate: number; dividendYield: number; dividendType: Holding['dividendType'] } {
-  // Use holding-specific rates if available
+  // Skip holding-specific rates - use account or scenario defaults only
+  // This removes the influence of holding/account overrides section
   const growthRate =
-    holding.growthRate ??
     account.investmentGrowthRate ??
     assumptions.investmentGrowthRate ??
     (assumptions.investmentReturnRate * 0.7); // Default: 70% growth, 30% dividends
 
   const dividendYield =
-    holding.dividendYield ??
     account.investmentDividendYield ??
     assumptions.investmentDividendYield ??
     (assumptions.investmentReturnRate * 0.3); // Default: 30% dividends
 
   const dividendType =
-    holding.dividendType ?? 'canadian_eligible'; // Default to Canadian eligible
+    holding.dividendType ?? 'canadian_eligible'; // Keep dividend type from holding (this is metadata, not a rate override)
 
   return { growthRate, dividendYield, dividendType };
 }
@@ -73,6 +72,29 @@ export function calculateInvestmentReturn(
   // Log if rates seem unusual (warn if > 50% annual or < -50% annual)
   if (Math.abs(normalizedGrowthRate) > 0.5 || Math.abs(normalizedDividendYield) > 0.5) {
     console.warn(`[taxCalculations] Unusual rates detected: growthRate=${(normalizedGrowthRate * 100).toFixed(2)}%, dividendYield=${(normalizedDividendYield * 100).toFixed(2)}% (original: growthRate=${growthRate}, dividendYield=${dividendYield})`);
+  }
+
+  return { growth, dividends, total };
+}
+
+// Calculate investment return for a period (annual - for annual compounding)
+export function calculateInvestmentReturnAnnual(
+  balance: number,
+  growthRate: number,
+  dividendYield: number
+): InvestmentReturn {
+  // Ensure rates are in decimal format (0.06 = 6%), not percentage format (6 = 6%)
+  const normalizedGrowthRate = (Math.abs(growthRate) > 1.0 && Math.abs(growthRate) <= 100) ? growthRate / 100 : growthRate;
+  const normalizedDividendYield = (Math.abs(dividendYield) > 1.0 && Math.abs(dividendYield) <= 100) ? dividendYield / 100 : dividendYield;
+  
+  // Use full annual rates (not divided by 12)
+  const growth = balance * normalizedGrowthRate;
+  const dividends = balance * normalizedDividendYield;
+  const total = growth + dividends;
+
+  // Log if rates seem unusual
+  if (Math.abs(normalizedGrowthRate) > 0.5 || Math.abs(normalizedDividendYield) > 0.5) {
+    console.warn(`[taxCalculations] Unusual rates detected: growthRate=${(normalizedGrowthRate * 100).toFixed(2)}%, dividendYield=${(normalizedDividendYield * 100).toFixed(2)}%`);
   }
 
   return { growth, dividends, total };
