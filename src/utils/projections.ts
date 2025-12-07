@@ -52,12 +52,43 @@ export function projectNetWorth(
   
   // 1. Calculate starting state
   const startingNetWorth = calcNetWorth(accounts);
-  const avgMonthlyIncome = calcMonthlyIncomeFromTransactions(transactions);
-  const avgMonthlyExpenses = calcMonthlyExpensesFromTransactions(transactions);
-  const monthlySavings = avgMonthlyIncome - avgMonthlyExpenses;
+  
+  // Check for manual income/expense inputs from right panel, otherwise use transaction-based calculations
+  const person1AnnualIncome = scenario.assumptions.income?.person1?.annualIncome;
+  const person2AnnualIncome = scenario.assumptions.income?.person2?.annualIncome;
+  const person1AnnualExpenses = scenario.assumptions.income?.person1?.annualExpenses;
+  const person2AnnualExpenses = scenario.assumptions.income?.person2?.annualExpenses;
+  
+  // Calculate base monthly values
+  let baseMonthlyIncome: number;
+  let baseMonthlyExpenses: number;
+  
+  if (person1AnnualIncome !== undefined || person2AnnualIncome !== undefined) {
+    // Use manual inputs if provided
+    const totalAnnualIncome = (person1AnnualIncome || 0) + (person2AnnualIncome || 0);
+    baseMonthlyIncome = totalAnnualIncome / 12;
+    console.log('[projections] Using manual income inputs - Person 1:', person1AnnualIncome, 'Person 2:', person2AnnualIncome, 'Total monthly:', baseMonthlyIncome);
+  } else {
+    // Fall back to transaction-based calculation
+    baseMonthlyIncome = calcMonthlyIncomeFromTransactions(transactions);
+    console.log('[projections] Using transaction-based income:', baseMonthlyIncome);
+  }
+  
+  if (person1AnnualExpenses !== undefined || person2AnnualExpenses !== undefined) {
+    // Use manual inputs if provided
+    const totalAnnualExpenses = (person1AnnualExpenses || 0) + (person2AnnualExpenses || 0);
+    baseMonthlyExpenses = totalAnnualExpenses / 12;
+    console.log('[projections] Using manual expense inputs - Person 1:', person1AnnualExpenses, 'Person 2:', person2AnnualExpenses, 'Total monthly:', baseMonthlyExpenses);
+  } else {
+    // Fall back to transaction-based calculation
+    baseMonthlyExpenses = calcMonthlyExpensesFromTransactions(transactions);
+    console.log('[projections] Using transaction-based expenses:', baseMonthlyExpenses);
+  }
+  
+  const monthlySavings = baseMonthlyIncome - baseMonthlyExpenses;
   
   console.log('[projections] Starting net worth:', startingNetWorth);
-  console.log('[projections] Monthly income:', avgMonthlyIncome, 'expenses:', avgMonthlyExpenses, 'savings:', monthlySavings);
+  console.log('[projections] Monthly income:', baseMonthlyIncome, 'expenses:', baseMonthlyExpenses, 'savings:', monthlySavings);
   
   // 2. Initialize projection state (clone accounts to avoid mutating originals)
   let currentAssets = accounts
@@ -94,7 +125,7 @@ export function projectNetWorth(
     
     // Apply inflation to expenses
     const yearsElapsed = month / 12;
-    let inflatedExpenses = avgMonthlyExpenses * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
+    let inflatedExpenses = baseMonthlyExpenses * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
     
     // Determine if we're in retirement
     const targetRetirementAge = scenario.assumptions.retirement?.targetRetirementAge || scenario.assumptions.targetRetirementAge;
@@ -112,7 +143,7 @@ export function projectNetWorth(
     if (isRetired) {
       // In retirement: use retirement expense ratio for expenses, and add government benefits
       const retirementExpenseRatio = scenario.assumptions.retirement?.retirementExpenseRatio || scenario.assumptions.retirementExpenseRatio || 0.70;
-      inflatedExpenses = avgMonthlyExpenses * retirementExpenseRatio * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
+      inflatedExpenses = baseMonthlyExpenses * retirementExpenseRatio * Math.pow(1 + scenario.assumptions.inflationRate, yearsElapsed);
       
       // Add CPP benefits
       let cppIncome = 0;
@@ -193,7 +224,37 @@ export function projectNetWorth(
       }
     } else {
       // Not retired: use salary growth
-      grownIncome = avgMonthlyIncome * Math.pow(1 + scenario.assumptions.salaryGrowthRate, yearsElapsed);
+      // Check for per-person salary growth rates, otherwise use global rate
+      const person1SalaryGrowthRate = scenario.assumptions.income?.person1?.salaryGrowthRate ?? scenario.assumptions.salaryGrowthRate;
+      const person2SalaryGrowthRate = scenario.assumptions.income?.person2?.salaryGrowthRate ?? scenario.assumptions.salaryGrowthRate;
+      
+      // Calculate income for each person separately
+      let person1MonthlyIncome = 0;
+      let person2MonthlyIncome = 0;
+      
+      if (person1AnnualIncome !== undefined) {
+        // Person 1 has manual input - use it with their growth rate
+        person1MonthlyIncome = (person1AnnualIncome / 12) * Math.pow(1 + person1SalaryGrowthRate, yearsElapsed);
+      } else {
+        // Person 1 uses transaction-based (or portion of it if person 2 has manual input)
+        if (person2AnnualIncome !== undefined) {
+          // Person 2 has manual input, so person 1 gets the transaction-based amount
+          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsElapsed);
+        } else {
+          // Neither has manual input, use all transaction-based income for person 1
+          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsElapsed);
+        }
+      }
+      
+      if (person2AnnualIncome !== undefined) {
+        // Person 2 has manual input - use it with their growth rate
+        person2MonthlyIncome = (person2AnnualIncome / 12) * Math.pow(1 + person2SalaryGrowthRate, yearsElapsed);
+      }
+      // If person 2 doesn't have manual input, person2MonthlyIncome stays 0 (all income goes to person 1)
+      
+      grownIncome = person1MonthlyIncome + person2MonthlyIncome;
+      
+      console.log('[projections] Month', month, '- Person 1 income:', person1MonthlyIncome, 'Person 2 income:', person2MonthlyIncome, 'Total:', grownIncome);
     }
     
     // Calculate savings
@@ -232,6 +293,7 @@ export function projectNetWorth(
     // Note: investmentAccounts and investmentBalance are already calculated above
     
     // Calculate taxable income for tax calculations (simplified: use grown income)
+    // Note: baseMonthlyIncome is used for initial calculations, grownIncome is the current month's income
     const taxableIncome = grownIncome * 12; // Annual taxable income
     
     // Add new contributions to investments (assume 70% of savings goes to investments)

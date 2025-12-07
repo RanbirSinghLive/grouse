@@ -620,21 +620,6 @@ export const Projections = () => {
                           />
                           <p className="text-xs text-gray-500 mt-1">Dividend income (taxed differently)</p>
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Global Salary Growth Rate: {(currentScenario.assumptions.salaryGrowthRate * 100).toFixed(1)}%
-                          </label>
-                          <input
-                            type="range"
-                            min="0"
-                            max="0.10"
-                            step="0.001"
-                            value={currentScenario.assumptions.salaryGrowthRate}
-                            onChange={(e) => handleAssumptionChange('salaryGrowthRate', parseFloat(e.target.value))}
-                            className="w-full"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">Default annual salary growth rate</p>
-                        </div>
                       </div>
                     </div>
                   )}
@@ -676,26 +661,26 @@ export const Projections = () => {
                       />
                       
                       {/* Key Metrics */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                        <div className="bg-blue-50 p-4 rounded-lg">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 relative z-0">
+                        <div className="bg-blue-50 p-4 rounded-lg relative z-0">
                           <p className="text-sm text-gray-600">Starting Net Worth</p>
                           <p className="text-xl font-bold text-blue-900">
                             ${projectionResult.summary.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="bg-emerald-50 p-4 rounded-lg">
+                        <div className="bg-emerald-50 p-4 rounded-lg relative z-0">
                           <p className="text-sm text-gray-600">Ending Net Worth</p>
                           <p className="text-xl font-bold text-emerald-900">
                             ${projectionResult.summary.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="bg-purple-50 p-4 rounded-lg">
+                        <div className="bg-purple-50 p-4 rounded-lg relative z-0">
                           <p className="text-sm text-gray-600">Total Growth</p>
                           <p className="text-xl font-bold text-purple-900">
                             ${projectionResult.summary.totalGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="bg-orange-50 p-4 rounded-lg">
+                        <div className="bg-orange-50 p-4 rounded-lg relative z-0">
                           <p className="text-sm text-gray-600">Avg Annual Growth</p>
                           <p className="text-xl font-bold text-orange-900">
                             {projectionResult.summary.averageAnnualGrowth.toFixed(1)}%
@@ -1122,20 +1107,6 @@ export const Projections = () => {
                       ) : undefined
                     }
                   />
-                </ProjectionInputSection>
-
-                {/* Investments - Per-Account/Holding Overrides */}
-                <ProjectionInputSection
-                  id="investments"
-                  title="Investment Overrides"
-                  defaultExpanded={false}
-                  helpText="Override investment return rates for specific accounts or holdings (global rates set in left panel)"
-                >
-                  <div className="space-y-4">
-                    <p className="text-sm text-gray-600">
-                      Use the left panel to set global investment return rates. Use this section to override rates for specific accounts or holdings.
-                    </p>
-                  </div>
                 </ProjectionInputSection>
 
                 {/* Government Benefits */}

@@ -246,28 +246,6 @@ export const NetWorthProjectionChart = ({ result, scenario, onMilestoneClick }: 
           })}
         </LineChart>
       </ResponsiveContainer>
-      {/* Milestone legend */}
-      {milestones.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-3 text-xs">
-          <span className="font-semibold text-gray-700">Milestones:</span>
-          {milestones.map((milestone, index) => {
-            const color = getMilestoneColor(milestone.type);
-            return (
-              <button
-                key={`legend-${milestone.year}-${index}`}
-                onClick={() => handleMilestoneClick(milestone)}
-                className="px-2 py-1 rounded hover:bg-gray-100 transition-colors flex items-center gap-1"
-                style={{ color }}
-                title={milestone.description}
-              >
-                <span style={{ color }}>●</span>
-                <span>{milestone.label}</span>
-                <span className="text-gray-500">({milestone.year})</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 };
