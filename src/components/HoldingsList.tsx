@@ -50,7 +50,7 @@ export const HoldingsList = ({ account }: HoldingsListProps) => {
   };
 
   const handleRefreshPrices = async () => {
-    console.log('[HoldingsList] Refreshing prices');
+    console.log('[HoldingsList] Refreshing prices (bypassing cache)');
     setIsRefreshing(true);
     setRefreshProgress(null);
 
@@ -59,7 +59,8 @@ export const HoldingsList = ({ account }: HoldingsListProps) => {
         account.id,
         (current, total, ticker) => {
           setRefreshProgress({ current, total, ticker });
-        }
+        },
+        true // Bypass cache to get fresh prices
       );
       setRefreshProgress(null);
       alert('Prices updated successfully!');

@@ -34,6 +34,9 @@ export const Projections = () => {
   const [person2Age, setPerson2Age] = useState(household?.personProfiles?.person2?.age || undefined);
   // Chart collapse state
   const [chartExpanded, setChartExpanded] = useState(true);
+  // Panel visibility state
+  const [leftPanelVisible, setLeftPanelVisible] = useState(true);
+  const [rightPanelVisible, setRightPanelVisible] = useState(true);
   // Investment rate configuration state (reversed hierarchy: holding first)
   const [selectedHoldingTicker, setSelectedHoldingTicker] = useState<string | null>(null);
   const [fetchingRates, setFetchingRates] = useState(false);
@@ -287,6 +290,10 @@ export const Projections = () => {
       person1: {
         nickname: person1Nickname || undefined,
         age: person1Age || undefined,
+        // Preserve existing annualIncome if it exists
+        ...(household.personProfiles?.person1?.annualIncome !== undefined && {
+          annualIncome: household.personProfiles.person1.annualIncome
+        }),
       },
     };
     
@@ -295,6 +302,10 @@ export const Projections = () => {
       personProfiles.person2 = {
         nickname: person2Nickname || undefined,
         age: person2Age || undefined,
+        // Preserve existing annualIncome if it exists
+        ...(household.personProfiles?.person2?.annualIncome !== undefined && {
+          annualIncome: household.personProfiles.person2.annualIncome
+        }),
       };
     }
     
@@ -302,6 +313,7 @@ export const Projections = () => {
       ...household,
       personProfiles,
     });
+    console.log('[Projections] Person profiles saved, annualIncome preserved');
     alert('Person profiles saved!');
   };
 
@@ -431,8 +443,9 @@ export const Projections = () => {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-8">
+    <div className="h-screen flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 px-4 pt-4">
         <h1 className="text-3xl font-bold text-gray-900">Projections</h1>
         <button
           onClick={handleCreateScenario}
@@ -442,156 +455,452 @@ export const Projections = () => {
         </button>
       </div>
 
-
       {projectionScenarios.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl shadow-lg border-2 border-gray-200 text-center">
-          <p className="text-gray-600 mb-6">No projection scenarios yet. Create your first scenario to get started.</p>
-          <button
-            onClick={handleCreateScenario}
-            className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 shadow-lg transition-all"
-          >
-            Create Base Case Scenario
-          </button>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="bg-white p-12 rounded-2xl shadow-lg border-2 border-gray-200 text-center">
+            <p className="text-gray-600 mb-6">No projection scenarios yet. Create your first scenario to get started.</p>
+            <button
+              onClick={handleCreateScenario}
+              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 shadow-lg transition-all"
+            >
+              Create Base Case Scenario
+            </button>
+          </div>
         </div>
       ) : (
         <>
-          {/* Scenario Selector */}
-          <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
-            <div className="flex items-center gap-4 mb-4">
-              <label className="text-sm font-medium text-gray-700">Scenario:</label>
-              <select
-                value={selectedScenarioId || ''}
-                onChange={(e) => setSelectedScenarioId(e.target.value || null)}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {projectionScenarios.map(scenario => (
-                  <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
-                ))}
-              </select>
-              {currentScenario && (
-                <button
-                  onClick={() => handleDeleteScenario(currentScenario.id)}
-                  className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-all"
-                >
-                  🗑️ Delete
-                </button>
-              )}
-            </div>
-            {currentScenario && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-200">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Scenario Name</label>
-                  <input
-                    type="text"
-                    value={currentScenario.name}
-                    onChange={(e) => updateProjectionScenario(currentScenario.id, { ...currentScenario, name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Projection Years</label>
-                  <select
-                    value={currentScenario.config.projectionYears}
-                    onChange={(e) => handleConfigChange('projectionYears', parseInt(e.target.value))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value={1}>1 Year</option>
-                    <option value={5}>5 Years</option>
-                    <option value={10}>10 Years</option>
-                    <option value={15}>15 Years</option>
-                    <option value={20}>20 Years</option>
-                    <option value={25}>25 Years</option>
-                    <option value={30}>30 Years</option>
-                    <option value={35}>35 Years</option>
-                    <option value={40}>40 Years</option>
-                    <option value={45}>45 Years</option>
-                    <option value={50}>50 Years</option>
-                    <option value={55}>55 Years</option>
-                    <option value={60}>60 Years</option>
-                  </select>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Projection Chart */}
-          {projectionResult && currentScenario && (
-            <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
+          {/* Three Panel Layout */}
+          <div className="flex-1 flex overflow-hidden gap-2 px-2 pb-2 relative">
+            {/* Left Panel - Scenario Selection & General Settings */}
+            <div className={`bg-blue-50 rounded-lg shadow-lg border-2 border-blue-200 flex flex-col transition-all duration-300 ease-in-out relative ${
+              leftPanelVisible ? 'w-80 min-w-80' : 'w-12 min-w-12'
+            }`}>
+              {/* Toggle Button - Always visible in top-left corner */}
               <button
-                onClick={() => setChartExpanded(!chartExpanded)}
-                className="w-full flex items-center justify-between text-left mb-4"
+                onClick={() => setLeftPanelVisible(!leftPanelVisible)}
+                className="absolute top-3 left-3 p-2.5 bg-blue-100 hover:bg-blue-200 text-gray-700 rounded-lg shadow-md hover:shadow-lg transition-all z-20 border border-blue-300"
+                title={leftPanelVisible ? "Hide Settings Panel" : "Show Settings Panel"}
               >
-                <h2 className="text-2xl font-bold text-gray-900">Net Worth Projection</h2>
-                <svg
-                  className={`w-6 h-6 text-gray-500 transition-transform ${
-                    chartExpanded ? 'transform rotate-180' : ''
-                  }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  {/* Rounded rectangle outline */}
+                  <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" fill="none" />
+                  {/* Vertical divider line (left side) */}
+                  <line x1="8" y1="4" x2="8" y2="20" stroke="currentColor" strokeWidth={1.5} />
+                  {/* Three horizontal lines on left (menu icon) */}
+                  <line x1="5" y1="7" x2="7" y2="7" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+                  <line x1="5" y1="10" x2="7" y2="10" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+                  <line x1="5" y1="13" x2="7" y2="13" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
                 </svg>
               </button>
-              {chartExpanded && (
-                <>
-                  <NetWorthProjectionChart 
-                    result={projectionResult} 
-                    scenario={currentScenario}
-                    onMilestoneClick={scrollToSection}
-                  />
-                  
-                  {/* Key Metrics */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                    <div className="bg-blue-50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-600">Starting Net Worth</p>
-                      <p className="text-xl font-bold text-blue-900">
-                        ${projectionResult.summary.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </p>
-                    </div>
-                    <div className="bg-emerald-50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-600">Ending Net Worth</p>
-                      <p className="text-xl font-bold text-emerald-900">
-                        ${projectionResult.summary.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </p>
-                    </div>
-                    <div className="bg-purple-50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-600">Total Growth</p>
-                      <p className="text-xl font-bold text-purple-900">
-                        ${projectionResult.summary.totalGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </p>
-                    </div>
-                    <div className="bg-orange-50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-600">Avg Annual Growth</p>
-                      <p className="text-xl font-bold text-orange-900">
-                        {projectionResult.summary.averageAnnualGrowth.toFixed(1)}%
-                      </p>
+              
+              {leftPanelVisible && (
+                <div className="flex-1 overflow-y-auto p-4 pt-14">
+
+                  {/* Scenario Selector */}
+                  <div className="mb-6">
+                    <h2 className="text-xl font-bold text-gray-900 mb-4">Scenario</h2>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Select Scenario</label>
+                        <select
+                          value={selectedScenarioId || ''}
+                          onChange={(e) => setSelectedScenarioId(e.target.value || null)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          {projectionScenarios.map(scenario => (
+                            <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {currentScenario && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Scenario Name</label>
+                            <input
+                              type="text"
+                              value={currentScenario.name}
+                              onChange={(e) => updateProjectionScenario(currentScenario.id, { ...currentScenario, name: e.target.value })}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Projection Years</label>
+                            <select
+                              value={currentScenario.config.projectionYears}
+                              onChange={(e) => handleConfigChange('projectionYears', parseInt(e.target.value))}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value={1}>1 Year</option>
+                              <option value={5}>5 Years</option>
+                              <option value={10}>10 Years</option>
+                              <option value={15}>15 Years</option>
+                              <option value={20}>20 Years</option>
+                              <option value={25}>25 Years</option>
+                              <option value={30}>30 Years</option>
+                              <option value={35}>35 Years</option>
+                              <option value={40}>40 Years</option>
+                              <option value={45}>45 Years</option>
+                              <option value={50}>50 Years</option>
+                              <option value={55}>55 Years</option>
+                              <option value={60}>60 Years</option>
+                            </select>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteScenario(currentScenario.id)}
+                            className="w-full px-4 py-2 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-all"
+                          >
+                            🗑️ Delete Scenario
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  {projectionResult.summary.debtFreeDate && (
-                    <div className="mt-4 p-4 bg-green-50 rounded-lg">
-                      <p className="text-sm font-medium text-green-800">
-                        🎉 Debt-Free Date: {new Date(projectionResult.summary.debtFreeDate).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })}
-                      </p>
+                  {/* General Settings */}
+                  {currentScenario && (
+                    <div className="mb-6">
+                      <h2 className="text-xl font-bold text-gray-900 mb-4">General Settings</h2>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Inflation Rate: {(currentScenario.assumptions.inflationRate * 100).toFixed(1)}%
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.05"
+                            step="0.001"
+                            value={currentScenario.assumptions.inflationRate}
+                            onChange={(e) => handleAssumptionChange('inflationRate', parseFloat(e.target.value))}
+                            className="w-full"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Total Investment Return: {((currentScenario.assumptions.investmentGrowthRate ?? 0) + (currentScenario.assumptions.investmentDividendYield ?? 0) || currentScenario.assumptions.investmentReturnRate * 100).toFixed(1)}%
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.15"
+                            step="0.001"
+                            value={currentScenario.assumptions.investmentReturnRate}
+                            onChange={(e) => handleAssumptionChange('investmentReturnRate', parseFloat(e.target.value))}
+                            className="w-full"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Or specify growth + dividends in Investments section</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Investment Growth Rate: {((currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7) * 100).toFixed(1)}%
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.12"
+                            step="0.001"
+                            value={currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7}
+                            onChange={(e) => handleAssumptionChange('investmentGrowthRate', parseFloat(e.target.value))}
+                            className="w-full"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Capital appreciation</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Dividend Yield: {((currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3) * 100).toFixed(1)}%
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.08"
+                            step="0.001"
+                            value={currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3}
+                            onChange={(e) => handleAssumptionChange('investmentDividendYield', parseFloat(e.target.value))}
+                            className="w-full"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Dividend income (taxed differently)</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Global Salary Growth Rate: {(currentScenario.assumptions.salaryGrowthRate * 100).toFixed(1)}%
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.10"
+                            step="0.001"
+                            value={currentScenario.assumptions.salaryGrowthRate}
+                            onChange={(e) => handleAssumptionChange('salaryGrowthRate', parseFloat(e.target.value))}
+                            className="w-full"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Default annual salary growth rate</p>
+                        </div>
+                      </div>
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
-          )}
+
+            {/* Center Panel - Chart */}
+            <div className="flex-1 flex flex-col min-w-0 bg-white rounded-lg shadow-lg border-2 border-gray-200 overflow-hidden">
+              {projectionResult && currentScenario ? (
+                <div className="flex-1 overflow-y-auto p-6">
+                  <button
+                    onClick={() => setChartExpanded(!chartExpanded)}
+                    className="w-full flex items-center justify-between text-left mb-4"
+                  >
+                    <h2 className="text-2xl font-bold text-gray-900">Net Worth Projection</h2>
+                    <svg
+                      className={`w-6 h-6 text-gray-500 transition-transform ${
+                        chartExpanded ? 'transform rotate-180' : ''
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 9l-7 7-7-7"
+                      />
+                    </svg>
+                  </button>
+                  {chartExpanded && (
+                    <>
+                      <NetWorthProjectionChart 
+                        result={projectionResult} 
+                        scenario={currentScenario}
+                        onMilestoneClick={scrollToSection}
+                      />
+                      
+                      {/* Key Metrics */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600">Starting Net Worth</p>
+                          <p className="text-xl font-bold text-blue-900">
+                            ${projectionResult.summary.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                        <div className="bg-emerald-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600">Ending Net Worth</p>
+                          <p className="text-xl font-bold text-emerald-900">
+                            ${projectionResult.summary.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600">Total Growth</p>
+                          <p className="text-xl font-bold text-purple-900">
+                            ${projectionResult.summary.totalGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600">Avg Annual Growth</p>
+                          <p className="text-xl font-bold text-orange-900">
+                            {projectionResult.summary.averageAnnualGrowth.toFixed(1)}%
+                          </p>
+                        </div>
+                      </div>
+
+                      {projectionResult.summary.debtFreeDate && (
+                        <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                          <p className="text-sm font-medium text-green-800">
+                            🎉 Debt-Free Date: {new Date(projectionResult.summary.debtFreeDate).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' })}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Annual Summary Table by Account */}
+                      <div className="mt-6">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Annual Summary by Account</h3>
+                        <div className="overflow-x-auto border border-gray-300 rounded-lg">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="sticky left-0 bg-gray-50 px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300 z-10 min-w-[120px]">
+                                  Year
+                                </th>
+                                {(() => {
+                                  console.log('[Projections] Building annual summary table headers by account');
+                                  // Assets - sorted by type
+                                  const assetAccounts = [...accounts.filter(a => a.kind === 'asset')].sort((a, b) => {
+                                    const order = ['cash', 'chequing', 'tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered', 'primary_home', 'rental_property'];
+                                    const aIdx = order.indexOf(a.type) === -1 ? 999 : order.indexOf(a.type);
+                                    const bIdx = order.indexOf(b.type) === -1 ? 999 : order.indexOf(b.type);
+                                    return aIdx - bIdx;
+                                  });
+                                  
+                                  // Liabilities - sorted by type
+                                  const liabilityAccounts = [...accounts.filter(a => a.kind === 'liability')].sort((a, b) => {
+                                    const order = ['mortgage', 'loan', 'credit_card'];
+                                    const aIdx = order.indexOf(a.type) === -1 ? 999 : order.indexOf(a.type);
+                                    const bIdx = order.indexOf(b.type) === -1 ? 999 : order.indexOf(b.type);
+                                    return aIdx - bIdx;
+                                  });
+                                  
+                                  const allAccounts = [...assetAccounts, ...liabilityAccounts];
+                                  
+                                  return allAccounts.map((acc) => (
+                                    <th key={acc.id} className={`px-4 py-3 text-left text-xs font-semibold uppercase border-r border-gray-200 whitespace-nowrap min-w-[140px] ${
+                                      acc.kind === 'liability' ? 'text-red-700' : 'text-gray-700'
+                                    }`}>
+                                      {acc.name}
+                                    </th>
+                                  ));
+                                })()}
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {(() => {
+                                console.log('[Projections] Building annual summary table rows by year');
+                                const rows: React.ReactElement[] = [];
+                                
+                                // Calculate totals for proportional calculations
+                                const totalStartingAssets = accounts.filter(a => a.kind === 'asset').reduce((sum, a) => sum + a.balance, 0);
+                                const totalStartingLiabilities = accounts.filter(a => a.kind === 'liability').reduce((sum, a) => sum + a.balance, 0);
+                                
+                                // Assets - sorted by type
+                                const assetAccounts = [...accounts.filter(a => a.kind === 'asset')].sort((a, b) => {
+                                  const order = ['cash', 'chequing', 'tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered', 'primary_home', 'rental_property'];
+                                  const aIdx = order.indexOf(a.type) === -1 ? 999 : order.indexOf(a.type);
+                                  const bIdx = order.indexOf(b.type) === -1 ? 999 : order.indexOf(b.type);
+                                  return aIdx - bIdx;
+                                });
+                                
+                                // Liabilities - sorted by type
+                                const liabilityAccounts = [...accounts.filter(a => a.kind === 'liability')].sort((a, b) => {
+                                  const order = ['mortgage', 'loan', 'credit_card'];
+                                  const aIdx = order.indexOf(a.type) === -1 ? 999 : order.indexOf(a.type);
+                                  const bIdx = order.indexOf(b.type) === -1 ? 999 : order.indexOf(b.type);
+                                  return aIdx - bIdx;
+                                });
+                                
+                                const allAccounts = [...assetAccounts, ...liabilityAccounts];
+                                
+                                // Starting row
+                                rows.push(
+                                  <tr key="starting" className="hover:bg-gray-50">
+                                    <td className="sticky left-0 bg-white px-4 py-3 text-sm font-medium text-gray-900 border-r border-gray-300 z-10">
+                                      Starting
+                                    </td>
+                                    {allAccounts.map((acc) => {
+                                      const startingBalance = acc.balance;
+                                      return (
+                                        <td key={acc.id} className={`px-4 py-3 text-sm border-r border-gray-200 whitespace-nowrap ${
+                                          acc.kind === 'liability' ? 'text-red-600' : 'text-gray-600'
+                                        }`}>
+                                          ${startingBalance.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                );
+                                
+                                // Year rows
+                                projectionResult.yearlyData.forEach((year, yearIdx) => {
+                                  rows.push(
+                                    <tr key={year.year} className="hover:bg-gray-50">
+                                      <td className="sticky left-0 bg-white px-4 py-3 text-sm font-medium text-gray-900 border-r border-gray-300 z-10">
+                                        {year.year}
+                                      </td>
+                                      {allAccounts.map((acc) => {
+                                        const startingBalance = acc.balance;
+                                        const isInvestment = ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(acc.type);
+                                        const isRealEstate = ['primary_home', 'rental_property'].includes(acc.type);
+                                        let estimatedBalance = startingBalance;
+                                        
+                                        if (acc.kind === 'asset') {
+                                          if (isInvestment) {
+                                            // Investment accounts grow with returns
+                                            const accountShare = totalStartingAssets > 0 ? startingBalance / totalStartingAssets : 0;
+                                            // Accumulate growth from all previous years
+                                            let cumulativeGrowth = 0;
+                                            for (let i = 0; i <= yearIdx; i++) {
+                                              cumulativeGrowth += (projectionResult.yearlyData[i]?.investmentGrowth || 0) * accountShare;
+                                            }
+                                            estimatedBalance = startingBalance + cumulativeGrowth;
+                                          } else if (isRealEstate) {
+                                            // Real estate grows with inflation
+                                            const yearsElapsed = yearIdx + 1;
+                                            const inflationRate = currentScenario?.assumptions.inflationRate || 0.02;
+                                            estimatedBalance = startingBalance * Math.pow(1 + inflationRate, yearsElapsed);
+                                          } else {
+                                            // Cash accounts grow with contributions (savings)
+                                            const yearsElapsed = yearIdx + 1;
+                                            const yearSavings = year.totalSavings || 0;
+                                            const accountShare = totalStartingAssets > 0 ? startingBalance / totalStartingAssets : 0;
+                                            estimatedBalance = startingBalance + (yearSavings * accountShare * yearsElapsed);
+                                          }
+                                        } else {
+                                          // Liabilities decrease over time
+                                          // Calculate cumulative debt paydown
+                                          let cumulativePaydown = 0;
+                                          for (let i = 0; i <= yearIdx; i++) {
+                                            cumulativePaydown += projectionResult.yearlyData[i]?.debtPaydown || 0;
+                                          }
+                                          
+                                          // Estimate this account's share of paydown
+                                          const accountShare = totalStartingLiabilities > 0 ? startingBalance / totalStartingLiabilities : 0;
+                                          estimatedBalance = Math.max(0, startingBalance - (cumulativePaydown * accountShare));
+                                        }
+                                        
+                                        return (
+                                          <td key={acc.id} className={`px-4 py-3 text-sm border-r border-gray-200 whitespace-nowrap ${
+                                            acc.kind === 'liability' ? 'text-red-600' : 'text-gray-600'
+                                          }`}>
+                                            ${Math.round(estimatedBalance).toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  );
+                                });
+                                
+                                return rows;
+                              })()}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center p-6">
+                  <p className="text-gray-500">Select a scenario to view projections</p>
+                </div>
+              )}
+            </div>
 
 
-          {/* Projection Inputs - Always Visible */}
-          {currentScenario && (
-            <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200 mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Scenario Settings</h2>
-              <div className="space-y-4">
+            {/* Right Panel - Input Sections */}
+            <div className={`bg-blue-50 rounded-lg shadow-lg border-2 border-blue-200 flex flex-col transition-all duration-300 ease-in-out relative ${
+              rightPanelVisible ? 'w-96 min-w-96' : 'w-12 min-w-12'
+            }`}>
+              {/* Toggle Button - Always visible in top-right corner */}
+              <button
+                onClick={() => setRightPanelVisible(!rightPanelVisible)}
+                className="absolute top-3 right-3 p-2.5 bg-blue-100 hover:bg-blue-200 text-gray-700 rounded-lg shadow-md hover:shadow-lg transition-all z-20 border border-blue-300"
+                title={rightPanelVisible ? "Hide Inputs Panel" : "Show Inputs Panel"}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  {/* Rounded rectangle outline */}
+                  <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" fill="none" />
+                  {/* Vertical divider line (right side - panel on right) */}
+                  <line x1="16" y1="4" x2="16" y2="20" stroke="currentColor" strokeWidth={1.5} />
+                  {/* Three horizontal lines on right side (menu icon) */}
+                  <line x1="17" y1="7" x2="19" y2="7" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+                  <line x1="17" y1="10" x2="19" y2="10" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+                  <line x1="17" y1="13" x2="19" y2="13" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+                </svg>
+              </button>
+              
+              {rightPanelVisible && (
+                <div className="flex-1 overflow-y-auto p-4 pt-14">
+
+                  {currentScenario && (
+                    <div className="space-y-4">
                 {/* Person Profiles */}
                 {household && (
                   <ProjectionInputSection
@@ -710,10 +1019,10 @@ export const Projections = () => {
                     showPerson2={hasPerson2}
                     person1Content={
                       <div className="space-y-4">
-                        <div>
+                <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
                             Annual Income (CAD)
-                          </label>
+                            </label>
                           <input
                             type="number"
                             min="0"
@@ -744,12 +1053,12 @@ export const Projections = () => {
                           {/* FYI Info - Auto-calculated from transactions (excluding mortgage payments) */}
                           <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-xs text-gray-600">
                             <span className="font-medium">FYI:</span> Auto-calculated from transactions (excluding mortgage payments): ${(autoCalculatedMonthlyExpenses * 12).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/year
+                            </div>
                           </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
                             Salary Growth Rate: {((getNestedAssumption(['income', 'person1', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate) * 100).toFixed(1)}%
-                          </label>
+                            </label>
                           <input
                             type="range"
                             min="0"
@@ -760,8 +1069,8 @@ export const Projections = () => {
                             className="w-full"
                           />
                           <p className="text-xs text-gray-500 mt-1">Annual salary growth rate (uses global rate if not set)</p>
-                        </div>
-                      </div>
+                            </div>
+                          </div>
                     }
                     person2Content={
                       hasPerson2 ? (
@@ -793,115 +1102,39 @@ export const Projections = () => {
                               placeholder="Enter annual expenses"
                               className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
                               Salary Growth Rate: {((getNestedAssumption(['income', 'person2', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate) * 100).toFixed(1)}%
-                            </label>
-                            <input
-                              type="range"
-                              min="0"
-                              max="0.10"
-                              step="0.001"
+                  </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.10"
+                            step="0.001"
                               value={getNestedAssumption(['income', 'person2', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate}
                               onChange={(e) => handleNestedAssumptionChange(['income', 'person2', 'salaryGrowthRate'], parseFloat(e.target.value))}
-                              className="w-full"
-                            />
+                            className="w-full"
+                          />
                             <p className="text-xs text-gray-500 mt-1">Annual salary growth rate (uses global rate if not set)</p>
-                          </div>
+                        </div>
                         </div>
                       ) : undefined
                     }
                   />
-                  {/* Global Salary Growth Rate (if no per-person rates set) */}
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Global Salary Growth Rate: {(currentScenario.assumptions.salaryGrowthRate * 100).toFixed(1)}%
-                    </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="0.10"
-                      step="0.001"
-                      value={currentScenario.assumptions.salaryGrowthRate}
-                      onChange={(e) => handleAssumptionChange('salaryGrowthRate', parseFloat(e.target.value))}
-                      className="w-full"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Default annual salary growth rate (used if per-person rates not set)</p>
-                  </div>
                 </ProjectionInputSection>
 
-                {/* Investments */}
+                {/* Investments - Per-Account/Holding Overrides */}
                 <ProjectionInputSection
                   id="investments"
-                  title="Investments"
-                  defaultExpanded={true}
-                  helpText="Global investment return assumptions and per-account/holding overrides"
+                  title="Investment Overrides"
+                  defaultExpanded={false}
+                  helpText="Override investment return rates for specific accounts or holdings (global rates set in left panel)"
                 >
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Total Investment Return: {((currentScenario.assumptions.investmentGrowthRate ?? 0) + (currentScenario.assumptions.investmentDividendYield ?? 0) || currentScenario.assumptions.investmentReturnRate * 100).toFixed(1)}%
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="0.15"
-                          step="0.001"
-                          value={currentScenario.assumptions.investmentReturnRate}
-                          onChange={(e) => handleAssumptionChange('investmentReturnRate', parseFloat(e.target.value))}
-                          className="w-full"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Or specify growth + dividends below</p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Inflation Rate: {(currentScenario.assumptions.inflationRate * 100).toFixed(1)}%
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="0.05"
-                          step="0.001"
-                          value={currentScenario.assumptions.inflationRate}
-                          onChange={(e) => handleAssumptionChange('inflationRate', parseFloat(e.target.value))}
-                          className="w-full"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Investment Growth Rate: {((currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7) * 100).toFixed(1)}%
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="0.12"
-                          step="0.001"
-                          value={currentScenario.assumptions.investmentGrowthRate ?? currentScenario.assumptions.investmentReturnRate * 0.7}
-                          onChange={(e) => handleAssumptionChange('investmentGrowthRate', parseFloat(e.target.value))}
-                          className="w-full"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Capital appreciation</p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Dividend Yield: {((currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3) * 100).toFixed(1)}%
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="0.08"
-                          step="0.001"
-                          value={currentScenario.assumptions.investmentDividendYield ?? currentScenario.assumptions.investmentReturnRate * 0.3}
-                          onChange={(e) => handleAssumptionChange('investmentDividendYield', parseFloat(e.target.value))}
-                          className="w-full"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Dividend income (taxed differently)</p>
-                      </div>
-                    </div>
+                    <p className="text-sm text-gray-600">
+                      Use the left panel to set global investment return rates. Use this section to override rates for specific accounts or holdings.
+                    </p>
                   </div>
                 </ProjectionInputSection>
 
@@ -1803,62 +2036,12 @@ export const Projections = () => {
                   )}
                 </div>
                 </ProjectionInputSection>
-              </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-          )}
-
-          {/* Year-by-Year Breakdown */}
-          {projectionResult && (
-            <div className="bg-white p-6 rounded-2xl shadow-lg border-2 border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Year-by-Year Breakdown</h2>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Year</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Starting NW</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Ending NW</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Change</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Income</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Expenses</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Savings</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Investment Growth</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {projectionResult.yearlyData.map((year) => (
-                      <tr key={year.year} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{year.year}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                          ${year.startingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                          ${year.endingNetWorth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${
-                          year.netWorthChange >= 0 ? 'text-emerald-600' : 'text-red-600'
-                        }`}>
-                          {year.netWorthChange >= 0 ? '+' : ''}${year.netWorthChange.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                          ${year.totalIncome.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                          ${year.totalExpenses.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                          ${year.totalSavings.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-600 font-semibold">
-                          ${year.investmentGrowth.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          </div>
         </>
       )}
     </div>

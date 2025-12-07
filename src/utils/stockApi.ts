@@ -78,8 +78,8 @@ const getCurrencyFromTicker = (ticker: string): 'CAD' | 'USD' => {
 };
 
 // Fetch price from Alpha Vantage API
-export const fetchPrice = async (ticker: string): Promise<PriceData> => {
-  console.log('[stockApi] fetchPrice:', ticker);
+export const fetchPrice = async (ticker: string, bypassCache: boolean = false): Promise<PriceData> => {
+  console.log('[stockApi] fetchPrice:', ticker, 'bypassCache:', bypassCache);
 
   // Special handling for CASH
   if (ticker === 'CASH') {
@@ -93,10 +93,21 @@ export const fetchPrice = async (ticker: string): Promise<PriceData> => {
     return cashData;
   }
 
-  // Check cache first
-  const cached = getCachedPrice(ticker);
-  if (cached) {
-    return cached;
+  // Check cache first (unless bypassing)
+  if (!bypassCache) {
+    const cached = getCachedPrice(ticker);
+    if (cached) {
+      console.log('[stockApi] Using cached price for:', ticker);
+      return cached;
+    }
+  } else {
+    console.log('[stockApi] Bypassing cache for:', ticker);
+    // Clear the cache for this ticker when bypassing
+    try {
+      localStorage.removeItem(`${CACHE_KEY_PREFIX}${ticker}`);
+    } catch (error) {
+      console.warn('[stockApi] Could not clear cache for', ticker);
+    }
   }
 
   // For TSX stocks, we need to use the correct symbol format
@@ -261,12 +272,13 @@ export const fetchPrice = async (ticker: string): Promise<PriceData> => {
 // Fetch prices for multiple tickers (with rate limiting)
 export const fetchPrices = async (
   tickers: string[],
-  onProgress?: (current: number, total: number, ticker: string) => void
+  onProgress?: (current: number, total: number, ticker: string) => void,
+  bypassCache: boolean = false
 ): Promise<PriceData[]> => {
-  console.log('[stockApi] fetchPrices:', tickers);
+  console.log('[stockApi] fetchPrices:', tickers, 'bypassCache:', bypassCache);
   const results: PriceData[] = [];
 
-  // Filter out CASH and check cache first
+  // Filter out CASH and check cache first (unless bypassing)
   const toFetch: string[] = [];
   for (const ticker of tickers) {
     if (ticker === 'CASH') {
@@ -277,11 +289,16 @@ export const fetchPrices = async (
         lastUpdated: new Date().toISOString(),
       });
     } else {
-      const cached = getCachedPrice(ticker);
-      if (cached) {
-        results.push(cached);
-      } else {
+      if (bypassCache) {
+        // Force fetch, skip cache
         toFetch.push(ticker);
+      } else {
+        const cached = getCachedPrice(ticker);
+        if (cached) {
+          results.push(cached);
+        } else {
+          toFetch.push(ticker);
+        }
       }
     }
   }
@@ -296,7 +313,7 @@ export const fetchPrices = async (
     if (onProgress) {
       onProgress(i + 1, toFetch.length, toFetch[i]);
     }
-    const priceData = await fetchPrice(toFetch[i]);
+    const priceData = await fetchPrice(toFetch[i], bypassCache);
     results.push(priceData);
   }
 
@@ -415,7 +432,6 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
     const minimumMonthsForAnyData = 2; // Need at least 2 months to calculate any return
     
     // Check if we have sufficient data
-    const hasInsufficientData = monthsOfData < minimumMonthsForReliableData;
     const hasMinimalData = monthsOfData >= minimumMonthsForAnyData && monthsOfData < minimumMonthsForReliableData;
     
     // Calculate growth rate

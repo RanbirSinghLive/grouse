@@ -98,8 +98,8 @@ export const NetWorthProjectionChart = ({ result, scenario, onMilestoneClick }: 
       }
     }
 
-    // 4. Net worth thresholds ($100k, $250k, $500k, $1M, $2M, $5M)
-    const thresholds = [100000, 250000, 500000, 1000000, 2000000, 5000000];
+    // 4. Net worth thresholds ($250k, $500k, $1M, $2M, $5M)
+    const thresholds = [250000, 500000, 1000000, 2000000, 5000000];
     const maxNetWorth = Math.max(...result.yearlyData.map(y => y.endingNetWorth));
     
     thresholds.forEach(threshold => {
@@ -166,7 +166,10 @@ export const NetWorthProjectionChart = ({ result, scenario, onMilestoneClick }: 
           <YAxis 
             stroke="#6b7280"
             style={{ fontSize: '12px' }}
-            tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+            tickFormatter={(value) => {
+              const millions = value / 1000000;
+              return `$${millions.toFixed(millions >= 1 ? 1 : 2)}M`;
+            }}
           />
           <Tooltip
             formatter={(value: number) => formatCurrency(value)}
