@@ -36,7 +36,6 @@ export type OASInputs = {
  * Simplified calculation based on Service Canada methodology
  */
 export function calculateCPPBenefit(inputs: CPPInputs): number {
-  console.log('[governmentBenefits] calculateCPPBenefit:', inputs);
   
   // If manual override provided, use it
   if (inputs.expectedBenefit !== undefined && inputs.expectedBenefit > 0) {
@@ -85,7 +84,6 @@ export function calculateCPPBenefit(inputs: CPPInputs): number {
   // Ensure benefit is within valid range
   monthlyBenefit = Math.max(0, Math.min(MAX_CPP_BENEFIT_2024 * 1.42, monthlyBenefit)); // Max is ~42% higher at 70
   
-  console.log('[governmentBenefits] Calculated CPP benefit:', monthlyBenefit.toFixed(2));
   return Math.round(monthlyBenefit * 100) / 100; // Round to 2 decimals
 }
 
@@ -93,7 +91,6 @@ export function calculateCPPBenefit(inputs: CPPInputs): number {
  * Calculate expected OAS benefit with clawback considerations
  */
 export function calculateOASBenefit(inputs: OASInputs, annualIncome: number = 0): number {
-  console.log('[governmentBenefits] calculateOASBenefit:', inputs, 'annualIncome:', annualIncome);
   
   // If manual override provided, use it (but still apply clawback)
   let monthlyBenefit = inputs.expectedBenefit;
@@ -131,7 +128,6 @@ export function calculateOASBenefit(inputs: OASInputs, annualIncome: number = 0)
   // Ensure benefit is within valid range
   monthlyBenefit = Math.max(0, Math.min(MAX_OAS_BENEFIT_2024 * 1.36, monthlyBenefit)); // Max is ~36% higher at 70
   
-  console.log('[governmentBenefits] Calculated OAS benefit:', monthlyBenefit.toFixed(2));
   return Math.round(monthlyBenefit * 100) / 100; // Round to 2 decimals
 }
 
@@ -195,6 +191,7 @@ export function getOASMaximums() {
     clawbackRate: OAS_CLAWBACK_RATE,
   };
 }
+
 
 
 

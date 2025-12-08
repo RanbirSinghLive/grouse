@@ -1,927 +1,212 @@
-// Projection calculation engine for v0.2
-// Handles net worth projections and retirement planning
+/**
+ * PROJECTION CALCULATION ENGINE
+ * 
+ * This file contains the projection calculation logic. As you build it up step by step,
+ * maintain transparency by:
+ * 
+ * 1. Clear function names that describe what they calculate
+ * 2. JSDoc comments explaining inputs, outputs, and assumptions
+ * 3. Intermediate result types for complex calculations
+ * 4. Step-by-step breakdowns in calculation functions
+ * 5. Optional: Calculation trace/debug mode
+ */
 
-import type {
-  Account,
-  Transaction,
-  ProjectionScenario,
-  ProjectionResult,
-  ProjectionMonth,
-  ProjectionYear,
-  ProjectionSummary,
-  MortgageVsInvestComparison,
-} from '../types/models';
-import { calcNetWorth, calcMonthlyIncomeFromTransactions, calcMonthlyExpensesFromTransactions } from './calculations';
-import {
-  calculateInvestmentReturnAnnual,
-  calculateAfterTaxReturn,
-} from './taxCalculations';
-import { calculateOASBenefit } from './governmentBenefits';
+import type { Account } from '../types/models';
 
-// Helper: Add months to a date
-function addMonths(dateStr: string, months: number): Date {
-  const date = new Date(dateStr);
-  date.setMonth(date.getMonth() + months);
-  return date;
-}
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
 
-// Helper: Format date as YYYY-MM-DD
-function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
-}
+/**
+ * Represents a single year in the projection
+ */
+export type ProjectionYear = {
+  year: number;
+  netWorth: number;
+  // Add more fields as you build out the model
+  // e.g., income, expenses, contributions, returns, etc.
+};
 
-// Helper: Get year from date
-function getYear(date: Date): number {
-  return date.getFullYear();
-}
+/**
+ * Complete projection result
+ */
+export type ProjectionResult = {
+  years: ProjectionYear[];
+  summary: {
+    startingNetWorth: number;
+    endingNetWorth: number;
+    totalGrowth: number;
+  };
+  // Optional: calculation trace for debugging
+  calculationTrace?: CalculationStep[];
+};
 
-// Helper: Get month from date (1-12)
-function getMonth(date: Date): number {
-  return date.getMonth() + 1;
-}
+/**
+ * Individual calculation step for transparency/debugging
+ */
+export type CalculationStep = {
+  step: string; // e.g., "Calculate income", "Apply investment returns"
+  year: number;
+  inputs: Record<string, any>; // What went into this calculation
+  outputs: Record<string, any>; // What came out
+  formula?: string; // Optional: mathematical formula used
+};
 
-// Calculate net worth projection
-export function projectNetWorth(
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+export type ProjectionConfig = {
+  startYear: number;
+  endYear: number;
+  // Add configuration options as needed
+  // e.g., investmentReturnRate, inflationRate, etc.
+};
+
+// ============================================================================
+// MAIN CALCULATION FUNCTION
+// ============================================================================
+
+/**
+ * Calculate net worth projection over time
+ * 
+ * @param accounts - Current account balances
+ * @param config - Projection configuration
+ * @param enableTrace - If true, includes detailed calculation trace
+ * @returns Projection result with yearly data
+ * 
+ * CALCULATION STEPS (build these incrementally):
+ * 1. Start with current net worth
+ * 2. For each year:
+ *    - Calculate income
+ *    - Calculate expenses
+ *    - Calculate savings (income - expenses)
+ *    - Apply investment returns
+ *    - Update account balances
+ *    - Calculate new net worth
+ */
+export function calculateProjection(
   accounts: Account[],
-  transactions: Transaction[],
-  scenario: ProjectionScenario
+  config: ProjectionConfig,
+  enableTrace: boolean = false
 ): ProjectionResult {
-  console.log('[projections] Starting net worth projection for scenario:', scenario.name);
+  const trace: CalculationStep[] = [];
   
-  // 1. Calculate starting state
-  const startingNetWorth = calcNetWorth(accounts);
+  // STEP 1: Calculate starting net worth
+  const startingNetWorth = calculateStartingNetWorth(accounts);
   
-  // Check for manual income/expense inputs from right panel, otherwise use transaction-based calculations
-  const person1AnnualIncome = scenario.assumptions.income?.person1?.annualIncome;
-  const person2AnnualIncome = scenario.assumptions.income?.person2?.annualIncome;
-  const person1AnnualExpenses = scenario.assumptions.income?.person1?.annualExpenses;
-  const person2AnnualExpenses = scenario.assumptions.income?.person2?.annualExpenses;
-  
-  // Calculate base monthly values
-  let baseMonthlyIncome: number;
-  let baseMonthlyExpenses: number;
-  
-  if (person1AnnualIncome !== undefined || person2AnnualIncome !== undefined) {
-    // Use manual inputs if provided
-    const totalAnnualIncome = (person1AnnualIncome || 0) + (person2AnnualIncome || 0);
-    baseMonthlyIncome = totalAnnualIncome / 12;
-    console.log('[projections] Using manual income inputs - Person 1:', person1AnnualIncome, 'Person 2:', person2AnnualIncome, 'Total monthly:', baseMonthlyIncome);
-  } else {
-    // Fall back to transaction-based calculation
-    baseMonthlyIncome = calcMonthlyIncomeFromTransactions(transactions);
-    console.log('[projections] Using transaction-based income:', baseMonthlyIncome);
+  if (enableTrace) {
+    trace.push({
+      step: 'Calculate starting net worth',
+      year: config.startYear,
+      inputs: { accounts: accounts.length },
+      outputs: { startingNetWorth },
+      formula: 'sum(asset balances) - sum(liability balances)'
+    });
   }
   
-  if (person1AnnualExpenses !== undefined || person2AnnualExpenses !== undefined) {
-    // Use manual inputs if provided
-    const totalAnnualExpenses = (person1AnnualExpenses || 0) + (person2AnnualExpenses || 0);
-    baseMonthlyExpenses = totalAnnualExpenses / 12;
-    console.log('[projections] Using manual expense inputs - Person 1:', person1AnnualExpenses, 'Person 2:', person2AnnualExpenses, 'Total monthly:', baseMonthlyExpenses);
-  } else {
-    // Fall back to transaction-based calculation
-    baseMonthlyExpenses = calcMonthlyExpensesFromTransactions(transactions);
-    console.log('[projections] Using transaction-based expenses:', baseMonthlyExpenses);
-  }
+  // STEP 2: Project year by year
+  const years: ProjectionYear[] = [];
+  let currentNetWorth = startingNetWorth;
   
-  const monthlySavings = baseMonthlyIncome - baseMonthlyExpenses;
-  
-  console.log('[projections] Starting net worth:', startingNetWorth);
-  console.log('[projections] Monthly income:', baseMonthlyIncome, 'expenses:', baseMonthlyExpenses, 'savings:', monthlySavings);
-  console.log('[projections] Investment allocation: 70% to investments, 30% to cash');
-  console.log('[projections] RESP accounts will be handled separately from general investment contributions');
-  
-  // 2. Initialize projection state (clone accounts to avoid mutating originals)
-  let currentAssets = accounts
-    .filter(a => a.kind === 'asset')
-    .map(a => ({ ...a, balance: a.balance }));
-  let currentLiabilities = accounts
-    .filter(a => a.kind === 'liability')
-    .map(a => ({ ...a, balance: a.balance }));
-  
-  const monthlyData: ProjectionMonth[] = [];
-  const totalMonths = scenario.config.projectionYears * 12;
-  
-  // Get initial investment accounts for logging (before loop)
-  const initialInvestmentAccounts = currentAssets.filter(a => 
-    ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(a.type)
-  );
-  const initialInvestmentBalance = initialInvestmentAccounts.reduce((sum, a) => sum + a.balance, 0);
-  
-  console.log('[projections] Projection years:', scenario.config.projectionYears, 'total months:', totalMonths);
-  console.log('[projections] Investment accounts:', initialInvestmentAccounts.length, 'total balance:', initialInvestmentBalance);
-  
-  // 3. Project month by month
-  for (let month = 0; month < totalMonths; month++) {
-    const date = addMonths(scenario.config.startDate, month);
-    const year = getYear(date);
-    const monthNum = getMonth(date);
-    const dateStr = formatDate(date);
-    
-    // Get investment accounts and balance for this month (needed for retirement calculations)
-    // NOTE: Only investment accounts compound with returns. Real estate (primary_home, rental_property) 
-    // is explicitly excluded and does NOT compound - home equity stays constant.
-    // IMPORTANT: RESP accounts are handled separately for contributions, so we exclude them from general investment contributions
-    const investmentAccounts = currentAssets.filter(a => 
-      ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(a.type)
-    );
-    const respAccounts = investmentAccounts.filter(a => a.type === 'resp');
-    const dcppAccounts = investmentAccounts.filter(a => a.type === 'dcpp');
-    const nonRespInvestmentAccounts = investmentAccounts.filter(a => a.type !== 'resp' && a.type !== 'dcpp');
-    const investmentBalance = investmentAccounts.reduce((sum, a) => sum + a.balance, 0);
-    
-    // Apply inflation to expenses (once per year, not continuously)
-    const yearsIntoProjection = Math.floor(month / 12);
-    let inflatedExpenses = baseMonthlyExpenses * Math.pow(1 + scenario.assumptions.inflationRate, yearsIntoProjection);
-    
-    // Determine if we're in retirement
-    const targetRetirementAge = scenario.assumptions.retirement?.targetRetirementAge || scenario.assumptions.targetRetirementAge;
-    const startDate = new Date(scenario.config.startDate);
-    const currentDate = addMonths(scenario.config.startDate, month);
-    const startYear = startDate.getFullYear();
-    const startMonth = startDate.getMonth();
-    const currentYear = currentDate.getFullYear();
-    const currentMonth = currentDate.getMonth();
-    const currentAge = (currentYear - startYear) + ((currentMonth - startMonth) / 12);
-    const isRetired = targetRetirementAge && currentAge >= targetRetirementAge;
-    
-    // Calculate base income
-    let grownIncome = 0;
-    if (isRetired) {
-      // In retirement: use retirement expense ratio for expenses, and add government benefits
-      const retirementExpenseRatio = scenario.assumptions.retirement?.retirementExpenseRatio || scenario.assumptions.retirementExpenseRatio || 0.70;
-      inflatedExpenses = baseMonthlyExpenses * retirementExpenseRatio * Math.pow(1 + scenario.assumptions.inflationRate, yearsIntoProjection);
-      
-      // Add CPP benefits
-      let cppIncome = 0;
-      if (scenario.assumptions.cpp?.person1?.expectedBenefit) {
-        cppIncome += scenario.assumptions.cpp.person1.expectedBenefit;
-      }
-      if (scenario.assumptions.cpp?.person2?.expectedBenefit) {
-        cppIncome += scenario.assumptions.cpp.person2.expectedBenefit;
-      }
-      
-      // Add OAS benefits (with clawback consideration)
-      let oasIncome = 0;
-      const currentAnnualIncome = grownIncome * 12; // Will be updated below
-      if (scenario.assumptions.oas?.person1?.expectedBenefit) {
-        const oas1 = calculateOASBenefit(
-          scenario.assumptions.oas.person1,
-          currentAnnualIncome
-        );
-        oasIncome += oas1;
-      }
-      if (scenario.assumptions.oas?.person2?.expectedBenefit) {
-        const oas2 = calculateOASBenefit(
-          scenario.assumptions.oas.person2,
-          currentAnnualIncome
-        );
-        oasIncome += oas2;
-      }
-      
-      // Calculate withdrawal from investments for income calculation
-      // NOTE: This uses the balance BEFORE returns are applied (for income reporting)
-      // The actual withdrawal amount will be recalculated later using the updated balance AFTER returns
-      const withdrawalRate = scenario.assumptions.retirement?.withdrawalRate || scenario.assumptions.withdrawalRate || 0.04;
-      const monthlyWithdrawalRate = withdrawalRate / 12; // Monthly
-      // Use current investment balance for income calculation (before returns)
-      const investmentWithdrawalForIncome = investmentBalance * monthlyWithdrawalRate;
-      
-      // Apply withdrawal strategy for income calculation
-      let withdrawalIncome = 0;
-      const withdrawalStrategy = scenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized';
-      
-      if (withdrawalStrategy === 'rrsp_first') {
-        // Withdraw from RRSP first
-        const rrspAccounts = investmentAccounts.filter(a => a.type === 'rrsp' || a.type === 'dcpp');
-        const rrspBalance = rrspAccounts.reduce((sum, a) => sum + a.balance, 0);
-        if (rrspBalance > 0) {
-          withdrawalIncome = Math.min(investmentWithdrawalForIncome, rrspBalance * monthlyWithdrawalRate);
-        } else {
-          // Fall back to TFSA
-          const tfsaAccounts = investmentAccounts.filter(a => a.type === 'tfsa');
-          const tfsaBalance = tfsaAccounts.reduce((sum, a) => sum + a.balance, 0);
-          withdrawalIncome = Math.min(investmentWithdrawalForIncome, tfsaBalance * monthlyWithdrawalRate);
-        }
-      } else if (withdrawalStrategy === 'tfsa_first') {
-        // Withdraw from TFSA first
-        const tfsaAccounts = investmentAccounts.filter(a => a.type === 'tfsa');
-        const tfsaBalance = tfsaAccounts.reduce((sum, a) => sum + a.balance, 0);
-        if (tfsaBalance > 0) {
-          withdrawalIncome = Math.min(investmentWithdrawalForIncome, tfsaBalance * monthlyWithdrawalRate);
-        } else {
-          // Fall back to RRSP
-          const rrspAccounts = investmentAccounts.filter(a => a.type === 'rrsp' || a.type === 'dcpp');
-          const rrspBalance = rrspAccounts.reduce((sum, a) => sum + a.balance, 0);
-          withdrawalIncome = Math.min(investmentWithdrawalForIncome, rrspBalance * monthlyWithdrawalRate);
-        }
-      } else if (withdrawalStrategy === 'balanced') {
-        // Withdraw proportionally
-        withdrawalIncome = investmentWithdrawalForIncome;
-      } else {
-        // Tax-optimized: balance between RRSP and TFSA to minimize taxes
-        withdrawalIncome = investmentWithdrawalForIncome;
-      }
-      
-      grownIncome = cppIncome + oasIncome + withdrawalIncome;
-      
-      // Add healthcare and long-term care costs if specified
-      if (scenario.assumptions.retirement?.healthcareCosts) {
-        inflatedExpenses += scenario.assumptions.retirement.healthcareCosts / 12;
-      }
-      if (scenario.assumptions.retirement?.longTermCareCosts) {
-        inflatedExpenses += scenario.assumptions.retirement.longTermCareCosts / 12;
-      }
-    } else {
-      // Not retired: use salary growth (once per year, not continuously)
-      // Check for per-person salary growth rates, otherwise use global rate
-      const person1SalaryGrowthRate = scenario.assumptions.income?.person1?.salaryGrowthRate ?? scenario.assumptions.salaryGrowthRate;
-      const person2SalaryGrowthRate = scenario.assumptions.income?.person2?.salaryGrowthRate ?? scenario.assumptions.salaryGrowthRate;
-      
-      // Calculate income for each person separately
-      let person1MonthlyIncome = 0;
-      let person2MonthlyIncome = 0;
-      
-      if (person1AnnualIncome !== undefined) {
-        // Person 1 has manual input - use it with their growth rate
-        person1MonthlyIncome = (person1AnnualIncome / 12) * Math.pow(1 + person1SalaryGrowthRate, yearsIntoProjection);
-      } else {
-        // Person 1 uses transaction-based (or portion of it if person 2 has manual input)
-        if (person2AnnualIncome !== undefined) {
-          // Person 2 has manual input, so person 1 gets the transaction-based amount
-          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsIntoProjection);
-        } else {
-          // Neither has manual input, use all transaction-based income for person 1
-          person1MonthlyIncome = baseMonthlyIncome * Math.pow(1 + person1SalaryGrowthRate, yearsIntoProjection);
-        }
-      }
-      
-      if (person2AnnualIncome !== undefined) {
-        // Person 2 has manual input - use it with their growth rate
-        person2MonthlyIncome = (person2AnnualIncome / 12) * Math.pow(1 + person2SalaryGrowthRate, yearsIntoProjection);
-      }
-      // If person 2 doesn't have manual input, person2MonthlyIncome stays 0 (all income goes to person 1)
-      
-      grownIncome = person1MonthlyIncome + person2MonthlyIncome;
-      
-      console.log('[projections] Month', month, 'Years into projection:', yearsIntoProjection, '- Person 1 income:', person1MonthlyIncome, 'Person 2 income:', person2MonthlyIncome, 'Total:', grownIncome);
-    }
-    
-    // Calculate savings
-    let savings = grownIncome - inflatedExpenses;
-    
-    // Log savings calculation for debugging (first few months)
-    if (month < 3) {
-      console.log(`[projections] Month ${month}: income=${grownIncome.toFixed(2)}, expenses=${inflatedExpenses.toFixed(2)}, savings=${savings.toFixed(2)}`);
-    }
-    
-    // Apply life events
-    scenario.lifeEvents?.forEach(event => {
-      const eventYear = Math.floor(event.year);
-      const eventMonth = event.month || 1;
-      const currentYear = year;
-      const currentMonth = monthNum;
-      
-      // Check if this is the event month
-      if (eventYear === currentYear && eventMonth === currentMonth) {
-        if (event.type === 'income_change' || event.type === 'one_time_income') {
-          savings += event.amount;
-        } else if (event.type === 'expense_change' || event.type === 'one_time_expense') {
-          savings -= Math.abs(event.amount);
-        }
-        
-        // If recurring, apply going forward
-        if (event.recurring && month > 0) {
-          // Already applied above, will continue in future months
-        }
-      } else if (event.recurring && eventYear <= currentYear && (eventYear < currentYear || eventMonth <= currentMonth)) {
-        // Apply recurring events
-        if (event.type === 'income_change') {
-          savings += event.amount;
-        } else if (event.type === 'expense_change') {
-          savings -= Math.abs(event.amount);
-        }
-      }
-    });
-    
-    // IMPORTANT: Deduct RESP and DCPP contributions from savings BEFORE allocating to investments/cash
-    // This ensures these contributions come from the savings pool, not in addition to it
-    let respContributionThisMonth = 0;
-    if (scenario.assumptions.resp?.annualContribution && !isRetired) {
-      respContributionThisMonth = scenario.assumptions.resp.annualContribution / 12;
-      savings -= respContributionThisMonth;
-      
-      // Log first month RESP deduction for debugging
-      if (month === 0) {
-        console.log(`[projections] RESP contribution deducted from savings: ${respContributionThisMonth.toFixed(2)}/month`);
-      }
-    }
-    
-    let dcppContributionThisMonth = 0;
-    if (scenario.assumptions.dcpp?.annualContribution && !isRetired) {
-      dcppContributionThisMonth = scenario.assumptions.dcpp.annualContribution / 12;
-      savings -= dcppContributionThisMonth;
-      
-      // Log first month DCPP deduction for debugging
-      if (month === 0) {
-        console.log(`[projections] DCPP contribution deducted from savings: ${dcppContributionThisMonth.toFixed(2)}/month`);
-      }
-    }
-    
-    // Apply investment growth to investment accounts (tax-aware)
-    // NOTE: This happens BEFORE withdrawals in retirement, so investments continue to compound
-    // The order is: 1) Apply returns, 2) Add contributions (if any), 3) Deduct withdrawals (if retired)
-    // This ensures investments grow even while being withdrawn from
-    
-    // Calculate taxable income for tax calculations (simplified: use grown income)
-    // Note: baseMonthlyIncome is used for initial calculations, grownIncome is the current month's income
-    const taxableIncome = grownIncome * 12; // Annual taxable income
-    
-    // Add new contributions to investments (assume 70% of remaining savings goes to investments)
-    // NOTE: In retirement, savings are typically negative, so no contributions are added
-    // NOTE: RESP accounts are handled separately below, so we exclude them from this allocation
-    // NOTE: RESP contributions have already been deducted from savings above
-    const investmentAllocation = 0.7; // 70% to investments, 30% to cash
-    const investmentContributions = savings * investmentAllocation;
-    
-    let totalInvestmentGrowth = 0;
-    let totalInvestmentDividends = 0;
-    let totalTaxPaid = 0;
-    
-    // Process each investment account separately to apply per-account/holding rates and taxes
-    // Each account balance compounds individually - we do NOT compound net worth as a whole
-    // IMPORTANT: Investments continue to compound during retirement - returns are applied regardless of isRetired status
-    if (investmentAccounts.length > 0) {
-      // First pass: calculate returns and update balances for each account individually
-      investmentAccounts.forEach(acc => {
-        // Get return rates for this account
-        // NOTE: Holdings are NOT used to determine growth rates - only account-level or scenario-level rates are used
-        // This removes the ability to override general growth rates with holding-specific rates
-        const accountOverride = scenario.assumptions.accountOverrides?.[acc.id];
-        const accountGrowthRate = accountOverride?.investmentGrowthRate ??
-          acc.investmentGrowthRate ?? 
-          scenario.assumptions.investmentGrowthRate ?? 
-          (scenario.assumptions.investmentReturnRate * 0.7);
-        const accountDividendYield = accountOverride?.investmentDividendYield ??
-          acc.investmentDividendYield ?? 
-          scenario.assumptions.investmentDividendYield ?? 
-          (scenario.assumptions.investmentReturnRate * 0.3);
-        
-        // Apply investment returns annually (once per year at the start of each year)
-        // Only apply returns at month 0, 12, 24, 36, etc. (start of each year)
-        const isStartOfYear = (month % 12) === 0;
-        
-        if (isStartOfYear) {
-          // Log rates for debugging (first year only)
-          if (month === 0 && acc.name) {
-            console.log(`[projections] Account ${acc.name}: balance=${acc.balance.toFixed(2)}, growthRate=${(accountGrowthRate * 100).toFixed(2)}%, dividendYield=${(accountDividendYield * 100).toFixed(2)}%`);
-          }
-          
-          // Calculate investment return for this account (annual, not monthly)
-          // Use full annual rates, not divided by 12
-          const annualReturnData = calculateInvestmentReturnAnnual(acc.balance, accountGrowthRate, accountDividendYield);
-          
-          // Log first year returns for debugging
-          if (month === 0 && acc.name) {
-            console.log(`[projections] Account ${acc.name} annual return: growth=${annualReturnData.growth.toFixed(2)}, dividends=${annualReturnData.dividends.toFixed(2)}, total=${annualReturnData.total.toFixed(2)}`);
-          }
-          
-          // Calculate after-tax return (only applies to non-registered accounts)
-          const afterTaxReturn = calculateAfterTaxReturn(
-            annualReturnData,
-            acc,
-            scenario.assumptions,
-            taxableIncome
-          );
-          
-          // Update account balance with after-tax return (annual compounding)
-          const balanceBefore = acc.balance;
-          acc.balance += afterTaxReturn.totalAfterTax;
-          
-          // Log first year balance changes for debugging
-          if (month === 0 && acc.name) {
-            console.log(`[projections] Account ${acc.name}: ${balanceBefore.toFixed(2)} -> ${acc.balance.toFixed(2)} (annual change: ${afterTaxReturn.totalAfterTax.toFixed(2)})`);
-          }
-          
-          // Track totals (annual amounts, will be divided by 12 later for monthly reporting)
-          totalInvestmentGrowth += afterTaxReturn.afterTaxGrowth;
-          totalInvestmentDividends += afterTaxReturn.afterTaxDividends;
-          totalTaxPaid += afterTaxReturn.taxPaid;
-        }
-      });
-      
-      // Second pass: add contributions proportionally based on updated balances
-      // NOTE: In retirement, savings are typically negative (expenses > income from withdrawals),
-      // so investmentContributions will be negative or zero, meaning no new contributions
-      // IMPORTANT: Exclude RESP and DCPP accounts from general contributions - they have their own contribution logic below
-      if (investmentContributions > 0 && !isRetired && nonRespInvestmentAccounts.length > 0) {
-        const totalBalanceAfterReturns = nonRespInvestmentAccounts.reduce((sum, a) => sum + a.balance, 0);
-        if (totalBalanceAfterReturns > 0) {
-          nonRespInvestmentAccounts.forEach(acc => {
-            const proportion = acc.balance / totalBalanceAfterReturns;
-            const contribution = investmentContributions * proportion;
-            acc.balance += contribution;
-            
-            // Log first month contributions for debugging
-            if (month === 0 && acc.name) {
-              console.log(`[projections] Account ${acc.name} contribution: ${contribution.toFixed(2)} (proportion: ${(proportion * 100).toFixed(2)}%)`);
-            }
-          });
-        } else {
-          // If all balances are zero, split contributions equally
-          const contributionPerAccount = investmentContributions / nonRespInvestmentAccounts.length;
-          nonRespInvestmentAccounts.forEach(acc => {
-            acc.balance += contributionPerAccount;
-          });
-        }
-      }
-    }
-    
-    // Investment growth only occurs once per year (at start of year), so report it only in that month
-    // For other months, investmentGrowth will be 0
-    const investmentGrowth = totalInvestmentGrowth + totalInvestmentDividends; // Annual amount, reported in the month it occurs
-    
-    // Handle RESP contributions and CESG grants
-    // NOTE: RESP contributions were already deducted from savings above, so we just add them to RESP accounts here
-    // This ensures RESP accounts don't get double contributions and RESP comes from the savings pool
-    if (respContributionThisMonth > 0 && respAccounts.length > 0) {
-      const cesgMatch = scenario.assumptions.resp?.cesgMatch || 0.20;
-      const monthlyCESG = respContributionThisMonth * cesgMatch; // CESG matches 20% of contributions
-      
-      respAccounts.forEach(acc => {
-        acc.balance += respContributionThisMonth / respAccounts.length;
-        acc.balance += monthlyCESG / respAccounts.length; // Add CESG grant
-      });
-      
-      // Log first month RESP contributions for debugging
-      if (month === 0) {
-        console.log(`[projections] RESP contribution added to accounts: ${respContributionThisMonth.toFixed(2)}/month, CESG: ${monthlyCESG.toFixed(2)}/month`);
-      }
-    }
-    
-    // Handle DCPP contributions and employer matching
-    // NOTE: DCPP contributions were already deducted from savings above, so we just add them to DCPP accounts here
-    // This ensures DCPP accounts don't get double contributions and DCPP comes from the savings pool
-    if (dcppContributionThisMonth > 0 && dcppAccounts.length > 0) {
-      dcppAccounts.forEach(acc => {
-        const employeeContribution = dcppContributionThisMonth / dcppAccounts.length;
-        acc.balance += employeeContribution;
-        
-        // Apply employer matching if configured
-        if (acc.employerMatchPercentage && acc.employerMatchPercentage > 0) {
-          const employerMatch = employeeContribution * acc.employerMatchPercentage;
-          acc.balance += employerMatch;
-          
-          // Log first month DCPP contributions for debugging
-          if (month === 0) {
-            console.log(`[projections] DCPP ${acc.name}: employee contribution ${employeeContribution.toFixed(2)}/month, employer match ${employerMatch.toFixed(2)}/month (${(acc.employerMatchPercentage * 100).toFixed(0)}%)`);
-          }
-        } else {
-          // Log first month DCPP contributions for debugging (no match)
-          if (month === 0) {
-            console.log(`[projections] DCPP ${acc.name}: employee contribution ${employeeContribution.toFixed(2)}/month (no employer match)`);
-          }
-        }
-      });
-    }
-    
-    // Handle RESP withdrawals for education (if education start year reached)
-    if (scenario.assumptions.resp?.expectedEducationStart && scenario.assumptions.resp?.educationCosts) {
-      const educationStartYear = scenario.assumptions.resp.expectedEducationStart;
-      if (year >= educationStartYear && year < educationStartYear + 4) { // Assume 4 years of education
-        const respAccounts = investmentAccounts.filter(a => a.type === 'resp');
-        const monthlyEducationCost = scenario.assumptions.resp.educationCosts / 12;
-        const respBalance = respAccounts.reduce((sum, a) => sum + a.balance, 0);
-        
-        if (respBalance > 0) {
-          const withdrawal = Math.min(monthlyEducationCost, respBalance);
-          respAccounts.forEach(acc => {
-            const proportion = acc.balance / respBalance;
-            acc.balance -= withdrawal * proportion;
-          });
-          savings += withdrawal; // Add withdrawal to available savings
-          inflatedExpenses -= monthlyEducationCost; // Education costs reduce expenses
-        }
-      }
-    }
-    
-    // Apply retirement withdrawals if in retirement
-    // NOTE: Withdrawals happen AFTER investment returns are applied, so we use the updated balances
-    // This ensures investments continue to compound, and withdrawals are taken from the grown balance
-    if (isRetired) {
-      const withdrawalRate = scenario.assumptions.retirement?.withdrawalRate || scenario.assumptions.withdrawalRate || 0.04;
-      const monthlyWithdrawalRate = withdrawalRate / 12; // Monthly
-      const withdrawalStrategy = scenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized';
-      const rrspAccounts = investmentAccounts.filter(a => a.type === 'rrsp' || a.type === 'dcpp');
-      const tfsaAccounts = investmentAccounts.filter(a => a.type === 'tfsa');
-      // Recalculate balances AFTER returns have been applied (returns happen earlier in the loop)
-      const rrspBalance = rrspAccounts.reduce((sum, a) => sum + a.balance, 0);
-      const tfsaBalance = tfsaAccounts.reduce((sum, a) => sum + a.balance, 0);
-      const totalBalance = rrspBalance + tfsaBalance;
-      // Calculate withdrawal based on updated balance (after returns)
-      const investmentWithdrawal = totalBalance * monthlyWithdrawalRate;
-      
-      if (totalBalance > 0 && investmentWithdrawal > 0) {
-        if (withdrawalStrategy === 'rrsp_first') {
-          // Withdraw from RRSP first
-          if (rrspBalance > 0) {
-            const withdrawal = Math.min(investmentWithdrawal, rrspBalance * monthlyWithdrawalRate);
-            rrspAccounts.forEach(acc => {
-              const proportion = acc.balance / rrspBalance;
-              acc.balance -= withdrawal * proportion;
-            });
-          } else if (tfsaBalance > 0) {
-            const withdrawal = Math.min(investmentWithdrawal, tfsaBalance * monthlyWithdrawalRate);
-            tfsaAccounts.forEach(acc => {
-              const proportion = acc.balance / tfsaBalance;
-              acc.balance -= withdrawal * proportion;
-            });
-          }
-        } else if (withdrawalStrategy === 'tfsa_first') {
-          // Withdraw from TFSA first
-          if (tfsaBalance > 0) {
-            const withdrawal = Math.min(investmentWithdrawal, tfsaBalance * monthlyWithdrawalRate);
-            tfsaAccounts.forEach(acc => {
-              const proportion = acc.balance / tfsaBalance;
-              acc.balance -= withdrawal * proportion;
-            });
-          } else if (rrspBalance > 0) {
-            const withdrawal = Math.min(investmentWithdrawal, rrspBalance * monthlyWithdrawalRate);
-            rrspAccounts.forEach(acc => {
-              const proportion = acc.balance / rrspBalance;
-              acc.balance -= withdrawal * proportion;
-            });
-          }
-        } else {
-          // Balanced or tax-optimized: withdraw proportionally
-          const withdrawal = investmentWithdrawal;
-          if (rrspBalance > 0) {
-            rrspAccounts.forEach(acc => {
-              const proportion = acc.balance / totalBalance;
-              acc.balance -= withdrawal * proportion;
-            });
-          }
-          if (tfsaBalance > 0) {
-            tfsaAccounts.forEach(acc => {
-              const proportion = acc.balance / totalBalance;
-              acc.balance -= withdrawal * proportion;
-            });
-          }
-        }
-      }
-    }
-    
-    // Add remaining savings to cash accounts
-    // NOTE: RESP contributions have already been deducted from savings above,
-    // so cash contributions are calculated from the remaining savings after RESP
-    const cashContributions = savings * (1 - investmentAllocation);
-    const cashAccounts = currentAssets.filter(a => ['cash', 'chequing'].includes(a.type));
-    if (cashAccounts.length > 0 && cashContributions > 0) {
-      cashAccounts.forEach(acc => {
-        acc.balance += cashContributions / cashAccounts.length;
-      });
-      
-      // Log first month cash contributions for debugging
-      if (month === 0 && cashAccounts.length > 0) {
-        console.log(`[projections] Cash contribution: ${cashContributions.toFixed(2)} (30% of remaining savings after RESP)`);
-      }
-    }
-    
-    // Apply debt paydown
-    const mortgageAccounts = currentLiabilities.filter(a => a.type === 'mortgage');
-    let totalDebtPayments = 0;
-    let totalPrincipalPaydown = 0;
-    let totalInterestPaid = 0;
-    
-    mortgageAccounts.forEach(mortgage => {
-      // Check for scenario override first, then account default
-      const accountOverride = scenario.assumptions.accountOverrides?.[mortgage.id];
-      const monthlyPayment = accountOverride?.monthlyPayment ?? mortgage.monthlyPayment ?? 0;
-      const interestRate = accountOverride?.interestRate ?? mortgage.interestRate ?? 0;
-      const monthlyRate = interestRate / 12 / 100;
-      const interest = mortgage.balance * monthlyRate;
-      const principal = Math.min(monthlyPayment - interest, mortgage.balance);
-      
-      mortgage.balance = Math.max(0, mortgage.balance - principal);
-      totalDebtPayments += monthlyPayment;
-      totalPrincipalPaydown += principal;
-      totalInterestPaid += interest;
-    });
-    
-    // Apply other debt paydown (loans, credit cards)
-    const otherDebtAccounts = currentLiabilities.filter(a => a.type !== 'mortgage');
-    otherDebtAccounts.forEach(debt => {
-      // Check for scenario override first, then account default
-      const accountOverride = scenario.assumptions.accountOverrides?.[debt.id];
-      const monthlyPayment = accountOverride?.monthlyPayment ?? debt.monthlyPayment ?? 0;
-      if (monthlyPayment > 0) {
-        const interestRate = accountOverride?.interestRate ?? debt.interestRate ?? 0;
-        const monthlyRate = interestRate / 12 / 100;
-        const interest = debt.balance * monthlyRate;
-        const principal = Math.min(monthlyPayment - interest, debt.balance);
-        debt.balance = Math.max(0, debt.balance - principal);
-        totalDebtPayments += monthlyPayment;
-        totalPrincipalPaydown += principal;
-        totalInterestPaid += interest;
-      }
-    });
-    
-    // Calculate current net worth
-    const totalAssets = currentAssets.reduce((sum, a) => sum + a.balance, 0);
-    const totalLiabilities = currentLiabilities.reduce((sum, a) => sum + a.balance, 0);
-    const netWorth = totalAssets - totalLiabilities;
-    
-    // Calculate asset breakdown
-    const cashAssets = currentAssets
-      .filter(a => ['cash', 'chequing'].includes(a.type))
-      .reduce((sum, a) => sum + a.balance, 0);
-    const investmentAssets = investmentAccounts.reduce((sum, a) => sum + a.balance, 0);
-    const realEstateAssets = currentAssets
-      .filter(a => ['primary_home', 'rental_property'].includes(a.type))
-      .reduce((sum, a) => sum + a.balance, 0);
-    
-    const mortgageBalance = mortgageAccounts.reduce((sum, a) => sum + a.balance, 0);
-    const otherDebt = otherDebtAccounts.reduce((sum, a) => sum + a.balance, 0);
-    
-    // Store monthly data
-    monthlyData.push({
+  for (let year = config.startYear; year <= config.endYear; year++) {
+    // Build this incrementally - start simple, add complexity
+    const yearResult = calculateYear(
       year,
-      month: monthNum,
-      date: dateStr,
-      totalAssets,
-      cashAssets,
-      investmentAssets,
-      realEstateAssets,
-      totalLiabilities,
-      mortgageBalance,
-      otherDebt,
-      netWorth,
-      netWorthChange: month === 0 ? 0 : netWorth - monthlyData[month - 1].netWorth,
-      income: grownIncome,
-      expenses: inflatedExpenses,
-      savings,
-      savingsRate: grownIncome > 0 ? (savings / grownIncome) * 100 : 0,
-      investmentGrowth,
-      investmentContributions,
-      investmentDividends: totalInvestmentDividends,
-      investmentTaxPaid: totalTaxPaid,
-      debtPayments: totalDebtPayments,
-      principalPaydown: totalPrincipalPaydown,
-      interestPaid: totalInterestPaid,
-    });
-  }
-  
-  // 4. Aggregate yearly data
-  const yearlyData = aggregateYearly(monthlyData);
-  console.log('[projections] Aggregated', yearlyData.length, 'years of data');
-  
-  // 5. Calculate summary
-  const summary = calculateSummary(monthlyData, yearlyData, startingNetWorth);
-  
-  // Get final net worth from projection data
-  const finalNetWorth = monthlyData[monthlyData.length - 1]?.netWorth || startingNetWorth;
-  const netWorthChange = finalNetWorth - startingNetWorth;
-  const totalYears = scenario.config.projectionYears;
-  
-  console.log('[projections] ========================================');
-  console.log('[projections] PROJECTION SUMMARY');
-  console.log('[projections] ========================================');
-  console.log('[projections] Starting net worth:', startingNetWorth.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' }));
-  console.log('[projections] Ending net worth:', finalNetWorth.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' }));
-  console.log('[projections] Net worth change:', netWorthChange.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' }));
-  console.log('[projections] Projection period:', totalYears, 'years');
-  console.log('[projections] Average annual growth:', ((Math.pow(finalNetWorth / startingNetWorth, 1 / totalYears) - 1) * 100).toFixed(2) + '%');
-  console.log('[projections] ========================================');
-  
-  return {
-    scenarioId: scenario.id,
-    calculatedAt: new Date().toISOString(),
-    monthlyData,
-    yearlyData,
-    summary,
-  };
-}
-
-// Aggregate monthly data into yearly data
-function aggregateYearly(monthlyData: ProjectionMonth[]): ProjectionYear[] {
-  const yearlyMap = new Map<number, ProjectionYear>();
-  
-  monthlyData.forEach(month => {
-    if (!yearlyMap.has(month.year)) {
-      yearlyMap.set(month.year, {
-        year: month.year,
-        startingNetWorth: month.netWorth,
-        endingNetWorth: month.netWorth,
-        netWorthChange: 0,
-        totalIncome: 0,
-        totalExpenses: 0,
-        totalSavings: 0,
-        averageSavingsRate: 0,
-        investmentGrowth: 0,
-        debtPaydown: 0,
-      });
-    }
+      accounts,
+      currentNetWorth,
+      enableTrace ? trace : undefined
+    );
     
-    const yearData = yearlyMap.get(month.year)!;
-    yearData.endingNetWorth = month.netWorth;
-    yearData.totalIncome += month.income;
-    yearData.totalExpenses += month.expenses;
-    yearData.totalSavings += month.savings;
-    yearData.investmentGrowth += month.investmentGrowth;
-    yearData.debtPaydown += month.principalPaydown;
-  });
-  
-  // Calculate net worth change and average savings rate
-  yearlyMap.forEach((yearData, year) => {
-    const yearMonths = monthlyData.filter(m => m.year === year);
-    if (yearMonths.length > 0) {
-      const firstMonth = yearMonths[0];
-      yearData.startingNetWorth = firstMonth.netWorth;
-      yearData.netWorthChange = yearData.endingNetWorth - yearData.startingNetWorth;
-      
-      const totalIncome = yearData.totalIncome;
-      if (totalIncome > 0) {
-        yearData.averageSavingsRate = (yearData.totalSavings / totalIncome) * 100;
-      }
-    }
-  });
-  
-  return Array.from(yearlyMap.values()).sort((a, b) => a.year - b.year);
-}
-
-// Calculate summary metrics
-function calculateSummary(
-  monthlyData: ProjectionMonth[],
-  _yearlyData: ProjectionYear[], // Used for type checking but calculated from monthlyData
-  startingNetWorth: number
-): ProjectionSummary {
-  if (monthlyData.length === 0) {
-    return {
-      startingNetWorth,
-      endingNetWorth: startingNetWorth,
-      totalGrowth: 0,
-      averageAnnualGrowth: 0,
-      peakNetWorth: startingNetWorth,
-      peakNetWorthYear: new Date().getFullYear(),
-    };
-  }
-  
-  const endingNetWorth = monthlyData[monthlyData.length - 1].netWorth;
-  const totalGrowth = endingNetWorth - startingNetWorth;
-  const years = monthlyData.length / 12;
-  // Calculate Compound Annual Growth Rate (CAGR) - the correct way to measure average annual growth
-  // CAGR = ((Ending / Starting) ^ (1/years) - 1) * 100
-  const averageAnnualGrowth = years > 0 && startingNetWorth > 0 
-    ? (Math.pow(endingNetWorth / startingNetWorth, 1 / years) - 1) * 100 
-    : 0;
-  
-  // Find peak net worth
-  let peakNetWorth = startingNetWorth;
-  let peakNetWorthYear = new Date().getFullYear();
-  monthlyData.forEach(month => {
-    if (month.netWorth > peakNetWorth) {
-      peakNetWorth = month.netWorth;
-      peakNetWorthYear = month.year;
-    }
-  });
-  
-  // Find debt-free date
-  let debtFreeDate: string | undefined;
-  for (const month of monthlyData) {
-    if (month.totalLiabilities <= 0.01) { // Within 1 cent
-      debtFreeDate = month.date;
-      break;
-    }
+    years.push(yearResult);
+    currentNetWorth = yearResult.netWorth;
   }
   
   return {
+    years,
+    summary: {
     startingNetWorth,
-    endingNetWorth,
-    totalGrowth,
-    averageAnnualGrowth,
-    peakNetWorth,
-    peakNetWorthYear,
-    debtFreeDate,
+      endingNetWorth: currentNetWorth,
+      totalGrowth: currentNetWorth - startingNetWorth,
+    },
+    ...(enableTrace && { calculationTrace: trace })
   };
 }
 
-// Compare mortgage payoff vs investing
-export function compareMortgageVsInvest(
-  mortgage: Account,
-  monthlySurplus: number,
-  assumptions: ProjectionScenario['assumptions']
-): MortgageVsInvestComparison {
-  console.log('[projections] Comparing mortgage vs invest for mortgage:', mortgage.name);
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Calculate starting net worth from accounts
+ * 
+ * Formula: Sum of all asset balances - Sum of all liability balances
+ */
+function calculateStartingNetWorth(accounts: Account[]): number {
+  const assets = accounts
+    .filter(a => a.kind === 'asset')
+    .reduce((sum, a) => sum + a.balance, 0);
   
-  if (!mortgage.monthlyPayment || !mortgage.interestRate) {
-    throw new Error('Mortgage must have monthlyPayment and interestRate');
-  }
+  const liabilities = accounts
+    .filter(a => a.kind === 'liability')
+    .reduce((sum, a) => sum + a.balance, 0);
   
-  const mortgageRate = mortgage.interestRate / 100;
-  const investmentRate = assumptions.investmentReturnRate;
-  const monthlyMortgageRate = mortgageRate / 12;
-  const monthlyInvestmentRate = investmentRate / 12;
-  
-  // Scenario 1: Pay down mortgage
-  let mortgageBalance = mortgage.balance;
-  let mortgageMonths = 0;
-  const originalPayment = mortgage.monthlyPayment;
-  const prepaymentAmount = monthlySurplus;
-  
-  while (mortgageBalance > 0.01 && mortgageMonths < 600) { // Max 50 years
-    const interest = mortgageBalance * monthlyMortgageRate;
-    const principal = originalPayment - interest;
-    const prepayment = Math.min(prepaymentAmount, mortgageBalance - principal);
-    mortgageBalance = Math.max(0, mortgageBalance - principal - prepayment);
-    mortgageMonths++;
-  }
-  
-  const mortgagePayoffDate = new Date();
-  mortgagePayoffDate.setMonth(mortgagePayoffDate.getMonth() + mortgageMonths);
-  
-  // Scenario 2: Invest surplus
-  let investmentBalance = 0;
-  let investMonths = mortgageMonths; // Same timeline
-  
-  for (let month = 0; month < investMonths; month++) {
-    investmentBalance = investmentBalance * (1 + monthlyInvestmentRate) + monthlySurplus;
-  }
-  
-  // At mortgage payoff date, compare net worth
-  // Mortgage scenario: mortgage is paid off, no investment
-  // Invest scenario: mortgage still exists, but we have investments
-  const remainingMortgageBalance = mortgage.balance;
-  let remainingBalance = remainingMortgageBalance;
-  for (let month = 0; month < investMonths; month++) {
-    const interest = remainingBalance * monthlyMortgageRate;
-    const principal = originalPayment - interest;
-    remainingBalance = Math.max(0, remainingBalance - principal);
-  }
-  
-  const mortgageScenarioNetWorth = -remainingBalance; // Negative because it's debt
-  const investScenarioNetWorth = investmentBalance - remainingBalance;
-  const netWorthDifference = investScenarioNetWorth - mortgageScenarioNetWorth;
-  
-  // Generate recommendation
-  let recommendation: 'mortgage' | 'invest' | 'hybrid';
-  let reasoning: string;
-  
-  const threshold = mortgage.balance * 0.1; // 10% of mortgage balance
-  
-  if (netWorthDifference > threshold) {
-    recommendation = 'invest';
-    reasoning = `Investing provides ${formatCurrency(netWorthDifference)} more net worth at mortgage payoff. Investment returns (${(investmentRate * 100).toFixed(1)}%) exceed mortgage rate (${(mortgageRate * 100).toFixed(1)}%).`;
-  } else if (netWorthDifference < -threshold) {
-    recommendation = 'mortgage';
-    reasoning = `Paying down mortgage provides ${formatCurrency(Math.abs(netWorthDifference))} more net worth. Mortgage rate (${(mortgageRate * 100).toFixed(1)}%) exceeds expected investment returns (${(investmentRate * 100).toFixed(1)}%).`;
-  } else {
-    recommendation = 'hybrid';
-    reasoning = `Both strategies are similar (difference: ${formatCurrency(Math.abs(netWorthDifference))}). Consider splitting surplus: pay down mortgage for guaranteed return, invest remainder for growth potential.`;
-  }
+  return assets - liabilities;
+}
+
+/**
+ * Calculate projection for a single year
+ * 
+ * Build this incrementally:
+ * - Start: Just return current net worth (no changes)
+ * - Add: Income and expenses
+ * - Add: Investment returns
+ * - Add: Contributions
+ * - etc.
+ */
+function calculateYear(
+  year: number,
+  accounts: Account[],
+  previousNetWorth: number,
+  trace?: CalculationStep[]
+): ProjectionYear {
+  // TODO: Build this step by step
+  // For now, just return the previous net worth (straight line)
   
   return {
-    mortgagePayoffDate: formatDate(mortgagePayoffDate),
-    investPayoffDate: formatDate(mortgagePayoffDate),
-    netWorthDifference,
-    recommendation,
-    reasoning,
+    year,
+    netWorth: previousNetWorth,
   };
 }
 
-// Helper: Format currency
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-CA', {
-    style: 'currency',
-    currency: 'CAD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+// ============================================================================
+// FUTURE CALCULATION FUNCTIONS (add as you build)
+// ============================================================================
 
-// Create default scenario
-export function createDefaultScenario(householdId: string, province?: string): ProjectionScenario {
-  const now = new Date();
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    householdId,
-    name: 'Base Case',
-    type: 'net_worth',
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-    assumptions: {
-      investmentReturnRate: 0.06, // 6% annual (total return)
-      investmentGrowthRate: 0.042, // 4.2% annual (70% of total)
-      investmentDividendYield: 0.018, // 1.8% annual (30% of total)
-      inflationRate: 0.02, // 2% annual
-      salaryGrowthRate: 0.03, // 3% annual
-      province: province as any, // Use household province if available
-      // marginalTaxRate and rrspDeductionBenefit will be calculated from province and income
-    },
-    config: {
-      projectionYears: 10,
-      startDate: formatDate(now),
-      monthlySteps: true,
-    },
-    lifeEvents: [],
-  };
-}
+/**
+ * Calculate annual income for a given year
+ * 
+ * TODO: Implement when adding income calculations
+ */
+// function calculateAnnualIncome(year: number, ...): number {
+//   // Implementation
+// }
+
+/**
+ * Calculate annual expenses for a given year
+ * 
+ * TODO: Implement when adding expense calculations
+ */
+// function calculateAnnualExpenses(year: number, ...): number {
+//   // Implementation
+// }
+
+/**
+ * Calculate investment returns for accounts
+ * 
+ * TODO: Implement when adding investment growth
+ */
+// function calculateInvestmentReturns(accounts: Account[], ...): number {
+//   // Implementation
+// }
 

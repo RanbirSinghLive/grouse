@@ -11,7 +11,6 @@ interface CashflowGaugeProps {
 }
 
 export const CashflowGauge = ({ transactions }: CashflowGaugeProps) => {
-  console.log('[CashflowGauge] Rendering with transactions:', transactions.length);
   const monthlyCashflow = calcMonthlyCashflowFromTransactions(transactions);
   const savingsRate = calcSavingsRateFromTransactions(transactions);
   const monthlyIncome = calcMonthlyIncomeFromTransactions(transactions);

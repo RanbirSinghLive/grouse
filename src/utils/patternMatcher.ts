@@ -15,7 +15,6 @@ export const findMatchingPatterns = (
   tx: Transaction,
   patterns: TransactionPattern[]
 ): PatternMatch[] => {
-  console.log('[patternMatcher] Finding patterns for transaction:', tx.description);
   
   const matches: PatternMatch[] = [];
   
@@ -33,7 +32,6 @@ export const findMatchingPatterns = (
   // Sort by confidence (highest first)
   matches.sort((a, b) => b.confidence - a.confidence);
   
-  console.log('[patternMatcher] Found', matches.length, 'matches');
   return matches;
 };
 
@@ -147,7 +145,6 @@ export const createPatternFromTransaction = (
   },
   householdId: string
 ): TransactionPattern => {
-  console.log('[patternMatcher] Creating pattern from transaction:', tx.description);
   
   const keywords = extractKeywords(tx.description);
   
@@ -178,7 +175,6 @@ export const updatePatternConfidence = (
   pattern: TransactionPattern,
   wasCorrect: boolean
 ): TransactionPattern => {
-  console.log('[patternMatcher] Updating pattern confidence:', pattern.id, 'wasCorrect:', wasCorrect);
   
   let newConfidence = pattern.confidence;
   

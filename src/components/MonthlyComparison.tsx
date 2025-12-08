@@ -8,7 +8,6 @@ interface MonthlyComparisonProps {
 }
 
 export const MonthlyComparison = ({ transactions }: MonthlyComparisonProps) => {
-  console.log('[MonthlyComparison] Rendering with transactions:', transactions.length);
   
   const availableMonths = useMemo(() => getAvailableMonths(transactions), [transactions]);
   const [selectedMonths, setSelectedMonths] = useState<string[]>(
@@ -133,6 +132,7 @@ export const MonthlyComparison = ({ transactions }: MonthlyComparisonProps) => {
     </div>
   );
 };
+
 
 
 

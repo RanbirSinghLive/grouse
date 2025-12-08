@@ -46,3 +46,4 @@ if (householdData) {
 // This is documented in the breaking changes
 console.log('[Migration] Migration complete!');
 console.log('[Migration] WARNING: Existing projection scenarios with person1/person2 data will need manual review.');
+

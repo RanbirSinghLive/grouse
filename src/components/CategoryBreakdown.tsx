@@ -7,7 +7,6 @@ interface CategoryBreakdownProps {
 }
 
 export const CategoryBreakdown = ({ transactions }: CategoryBreakdownProps) => {
-  console.log('[CategoryBreakdown] Rendering with transactions:', transactions.length);
   
   const data = prepareCategoryBreakdownData(transactions);
   

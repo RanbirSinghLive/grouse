@@ -38,16 +38,13 @@ const isCacheValid = (cached: PriceData): boolean => {
 
 // Get cached price
 export const getCachedPrice = (ticker: string): PriceData | null => {
-  console.log('[stockApi] getCachedPrice:', ticker);
   try {
     const cached = localStorage.getItem(`${CACHE_KEY_PREFIX}${ticker}`);
     if (cached) {
       const data = JSON.parse(cached) as PriceData;
       if (isCacheValid(data)) {
-        console.log('[stockApi] Cache hit for:', ticker);
         return data;
       }
-      console.log('[stockApi] Cache expired for:', ticker);
     }
   } catch (error) {
     console.error('[stockApi] Error reading cache:', error);
@@ -57,7 +54,6 @@ export const getCachedPrice = (ticker: string): PriceData | null => {
 
 // Cache price data
 const cachePrice = (data: PriceData): void => {
-  console.log('[stockApi] Caching price:', data.ticker);
   try {
     localStorage.setItem(`${CACHE_KEY_PREFIX}${data.ticker}`, JSON.stringify(data));
   } catch (error) {
@@ -79,7 +75,6 @@ const getCurrencyFromTicker = (ticker: string): 'CAD' | 'USD' => {
 
 // Fetch price from Alpha Vantage API
 export const fetchPrice = async (ticker: string, bypassCache: boolean = false): Promise<PriceData> => {
-  console.log('[stockApi] fetchPrice:', ticker, 'bypassCache:', bypassCache);
 
   // Special handling for CASH
   if (ticker === 'CASH') {
@@ -97,11 +92,9 @@ export const fetchPrice = async (ticker: string, bypassCache: boolean = false): 
   if (!bypassCache) {
     const cached = getCachedPrice(ticker);
     if (cached) {
-      console.log('[stockApi] Using cached price for:', ticker);
       return cached;
     }
   } else {
-    console.log('[stockApi] Bypassing cache for:', ticker);
     // Clear the cache for this ticker when bypassing
     try {
       localStorage.removeItem(`${CACHE_KEY_PREFIX}${ticker}`);
@@ -126,12 +119,10 @@ export const fetchPrice = async (ticker: string, bypassCache: boolean = false): 
 
   try {
     const url = `${ALPHA_VANTAGE_BASE_URL}?function=GLOBAL_QUOTE&symbol=${apiSymbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
-    console.log('[stockApi] Fetching from API:', url);
 
     const response = await fetch(url);
     const data = await response.json();
 
-    console.log('[stockApi] API response:', data);
 
     // Check for API errors
     if (data['Error Message']) {
@@ -189,7 +180,6 @@ export const fetchPrice = async (ticker: string, bypassCache: boolean = false): 
       
       // Try base ticker with .TO
       if (apiSymbol !== `${baseTicker}.TO`) {
-        console.log('[stockApi] Retrying with base ticker + .TO:', `${baseTicker}.TO`);
         try {
           const retryUrl = `${ALPHA_VANTAGE_BASE_URL}?function=GLOBAL_QUOTE&symbol=${baseTicker}.TO&apikey=${ALPHA_VANTAGE_API_KEY}`;
           const retryResponse = await fetch(retryUrl);
@@ -213,7 +203,6 @@ export const fetchPrice = async (ticker: string, bypassCache: boolean = false): 
       
       // Try original ticker without .TO
       if (apiSymbol.includes('.TO')) {
-        console.log('[stockApi] Retrying without .TO suffix for:', ticker);
         try {
           const retryUrl = `${ALPHA_VANTAGE_BASE_URL}?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_API_KEY}`;
           const retryResponse = await fetch(retryUrl);
@@ -236,7 +225,6 @@ export const fetchPrice = async (ticker: string, bypassCache: boolean = false): 
       }
     } else if (apiSymbol.includes('.TO') && apiSymbol !== ticker) {
       // If we tried with .TO and it failed, try without .TO (for US stocks)
-      console.log('[stockApi] Retrying without .TO suffix for:', ticker);
       try {
         const retryUrl = `${ALPHA_VANTAGE_BASE_URL}?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_API_KEY}`;
         const retryResponse = await fetch(retryUrl);
@@ -275,7 +263,6 @@ export const fetchPrices = async (
   onProgress?: (current: number, total: number, ticker: string) => void,
   bypassCache: boolean = false
 ): Promise<PriceData[]> => {
-  console.log('[stockApi] fetchPrices:', tickers, 'bypassCache:', bypassCache);
   const results: PriceData[] = [];
 
   // Filter out CASH and check cache first (unless bypassing)
@@ -322,17 +309,14 @@ export const fetchPrices = async (
 
 // Get cached historical returns
 const getCachedHistoricalReturns = (ticker: string): HistoricalReturnData | null => {
-  console.log('[stockApi] getCachedHistoricalReturns:', ticker);
   try {
     const cached = localStorage.getItem(`${HISTORICAL_CACHE_KEY_PREFIX}${ticker}`);
     if (cached) {
       const data = JSON.parse(cached) as HistoricalReturnData;
       const cacheAge = Date.now() - new Date(data.endDate || Date.now().toString()).getTime();
       if (cacheAge < HISTORICAL_CACHE_DURATION_MS) {
-        console.log('[stockApi] Historical cache hit for:', ticker);
         return data;
       }
-      console.log('[stockApi] Historical cache expired for:', ticker);
     }
   } catch (error) {
     console.error('[stockApi] Error reading historical cache:', error);
@@ -342,7 +326,6 @@ const getCachedHistoricalReturns = (ticker: string): HistoricalReturnData | null
 
 // Cache historical returns
 const cacheHistoricalReturns = (data: HistoricalReturnData): void => {
-  console.log('[stockApi] Caching historical returns:', data.ticker);
   try {
     localStorage.setItem(`${HISTORICAL_CACHE_KEY_PREFIX}${data.ticker}`, JSON.stringify(data));
   } catch (error) {
@@ -352,7 +335,6 @@ const cacheHistoricalReturns = (data: HistoricalReturnData): void => {
 
 // Fetch historical returns from Alpha Vantage
 export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolean = false): Promise<HistoricalReturnData> => {
-  console.log('[stockApi] fetchHistoricalReturns:', ticker, 'bypassCache:', bypassCache);
 
   // Special handling for CASH
   if (ticker === 'CASH') {
@@ -373,7 +355,6 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
       return cached;
     }
   } else {
-    console.log('[stockApi] Bypassing cache for:', ticker);
   }
 
   // Format ticker for API (same logic as fetchPrice)
@@ -387,12 +368,10 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
   try {
     // Use TIME_SERIES_MONTHLY_ADJUSTED for price and dividend data
     const url = `${ALPHA_VANTAGE_BASE_URL}?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol=${apiSymbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
-    console.log('[stockApi] Fetching historical data from API:', url);
 
     const response = await fetch(url);
     const data = await response.json();
 
-    console.log('[stockApi] Historical API response keys:', Object.keys(data));
 
     // Check for API errors
     if (data['Error Message']) {
@@ -477,7 +456,6 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
       }
     }
     
-    console.log(`[stockApi] Dividend amount field check for ${ticker}: ${dividendMonths} months with dividends, total dividends: ${totalDividends.toFixed(4)}`);
 
     // Calculate dividend yield: (total dividends paid / average price) / years
     // This gives the annual yield over the historical period
@@ -499,7 +477,6 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
         
         // Total dividends paid over the period, divided by average price, divided by years = annual yield
         dividendYield = (totalDividends / avgPrice) / yearsOfData;
-        console.log(`[stockApi] Dividend yield for ${ticker}: ${(dividendYield * 100).toFixed(2)}% (${totalDividends.toFixed(4)} total dividends, ${avgPrice.toFixed(2)} avg price, ${yearsOfData.toFixed(1)} years)`);
       }
     } else {
       // Fallback: calculate from monthly total return vs price-only return difference
@@ -543,9 +520,7 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
       if (returnCount > 0) {
         // Average monthly distribution yield, then annualize
         dividendYield = (totalReturnDifference / returnCount) * 12;
-        console.log(`[stockApi] Using total return difference method for ${ticker}: ${(dividendYield * 100).toFixed(2)}% annual yield from ${returnCount} months (total diff: ${totalReturnDifference.toFixed(6)})`);
       } else {
-        console.log(`[stockApi] No valid return differences found for ${ticker} (checked ${dates.length - 1} month pairs)`);
         // Last resort: use overall CAGR difference
         const startClose = parseFloat(timeSeries[startDate]['4. close']);
         const endClose = parseFloat(timeSeries[endDate]['4. close']);
@@ -554,7 +529,6 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
           const totalReturn = growthRate; // From adjusted close, includes distributions
           // Dividend yield is the difference between total return and price-only return
           dividendYield = Math.max(0, totalReturn - priceOnlyReturn);
-          console.log(`[stockApi] Using overall CAGR difference for ${ticker}: ${(dividendYield * 100).toFixed(2)}% annual yield`);
         }
       }
     }
@@ -599,7 +573,6 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
     if (ticker.includes('.B') || ticker.includes('.A') || ticker.includes('.UN')) {
       const baseTicker = ticker.split('.')[0];
       if (apiSymbol !== `${baseTicker}.TO`) {
-        console.log('[stockApi] Retrying historical with base ticker + .TO:', `${baseTicker}.TO`);
         try {
           const retryUrl = `${ALPHA_VANTAGE_BASE_URL}?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol=${baseTicker}.TO&apikey=${ALPHA_VANTAGE_API_KEY}`;
           const retryResponse = await fetch(retryUrl);
@@ -615,7 +588,6 @@ export const fetchHistoricalReturns = async (ticker: string, bypassCache: boolea
       }
     } else if (apiSymbol.includes('.TO') && apiSymbol !== ticker) {
       // Try without .TO for US stocks
-      console.log('[stockApi] Retrying historical without .TO suffix for:', ticker);
       try {
         const retryUrl = `${ALPHA_VANTAGE_BASE_URL}?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol=${ticker}&apikey=${ALPHA_VANTAGE_API_KEY}`;
         const retryResponse = await fetch(retryUrl);

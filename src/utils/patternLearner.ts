@@ -17,14 +17,12 @@ export const learnFromClassification = (
   existingPatterns: TransactionPattern[],
   householdId: string
 ): TransactionPattern[] => {
-  console.log('[patternLearner] Learning from classification:', tx.description, classification);
   
   // Check if a similar pattern already exists
   const similarPattern = findSimilarPattern(tx, classification, existingPatterns);
   
   if (similarPattern) {
     // Update existing pattern
-    console.log('[patternLearner] Updating existing pattern:', similarPattern.id);
     return existingPatterns.map(p => {
       if (p.id === similarPattern.id) {
         return updatePatternConfidence(p, true);
@@ -33,7 +31,6 @@ export const learnFromClassification = (
     });
   } else {
     // Create new pattern
-    console.log('[patternLearner] Creating new pattern');
     const newPattern = createPatternFromTransaction(tx, classification, householdId);
     return [...existingPatterns, newPattern];
   }
@@ -74,7 +71,6 @@ export const updatePatternFromFeedback = (
   feedback: 'correct' | 'incorrect' | 'partial',
   patterns: TransactionPattern[]
 ): TransactionPattern[] => {
-  console.log('[patternLearner] Updating pattern from feedback:', patternId, feedback);
   
   return patterns.map(p => {
     if (p.id !== patternId) return p;
@@ -104,7 +100,6 @@ export const updatePatternFromFeedback = (
 export const mergeSimilarPatterns = (
   patterns: TransactionPattern[]
 ): TransactionPattern[] => {
-  console.log('[patternLearner] Merging similar patterns');
   
   const merged: TransactionPattern[] = [];
   const processed = new Set<string>();
@@ -136,7 +131,6 @@ export const mergeSimilarPatterns = (
     processed.add(pattern.id);
   }
   
-  console.log('[patternLearner] Merged', patterns.length, 'patterns into', merged.length);
   return merged;
 };
 

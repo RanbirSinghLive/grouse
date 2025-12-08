@@ -15,7 +15,6 @@ const COLORS: Record<AssetCategory, string> = {
 };
 
 export const AssetMixChart = ({ accounts }: AssetMixChartProps) => {
-  console.log('[AssetMixChart] Rendering with accounts:', accounts.length);
   const grouped = groupAccountsByCategory(accounts);
   const data = Object.entries(grouped)
     .map(([name, value]) => ({ name, value }))

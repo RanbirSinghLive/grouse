@@ -58,7 +58,6 @@ export const Budget = () => {
   
   // Calculate category averages from all transactions
   const categoryAverages = useMemo(() => {
-    console.log('[Budget] Calculating category averages from', existingTransactions.length, 'transactions');
     return calculateCategoryAverages(existingTransactions);
   }, [existingTransactions]);
   
@@ -662,7 +661,7 @@ export const Budget = () => {
                       {dateDisplay}
                     </td>
                     {owners.length > 0 && (
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{tx.owner || 'All / Household'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{tx.owner || 'All / Joint'}</td>
                     )}
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {isEditing ? (

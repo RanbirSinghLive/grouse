@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { Household, Account, Cashflow, AppData, Holding, Transaction, TransactionPattern, ImportData, ProjectionScenario } from '../types/models';
-import { loadData, saveData, loadImportData, saveImportData, loadProjectionData, saveProjectionData, loadBudgetNote, saveBudgetNote } from '../utils/storage';
+import type { Household, Account, Cashflow, AppData, Holding, Transaction, TransactionPattern, ImportData } from '../types/models';
+import { loadData, saveData, loadImportData, saveImportData, loadBudgetNote, saveBudgetNote } from '../utils/storage';
 import { fetchPrices } from '../utils/stockApi';
 
 interface HouseholdStore {
@@ -13,8 +13,6 @@ interface HouseholdStore {
   // Import state
   transactions: Transaction[];
   patterns: TransactionPattern[];
-  // Projection state
-  projectionScenarios: ProjectionScenario[];
   // Budget note
   budgetNote: string;
 
@@ -45,11 +43,6 @@ interface HouseholdStore {
   deletePattern: (id: string) => void;
   persistImportData: () => void;
   renameCategory: (oldName: string, newName: string) => void;
-  // Projection actions
-  addProjectionScenario: (scenario: Omit<ProjectionScenario, 'id' | 'createdAt' | 'updatedAt' | 'householdId'>) => void;
-  updateProjectionScenario: (id: string, updates: Partial<ProjectionScenario>) => void;
-  deleteProjectionScenario: (id: string) => void;
-  persistProjectionData: () => void;
   // Budget note actions
   setBudgetNote: (note: string) => void;
   reset: () => void;
@@ -69,7 +62,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       cashflows: state.cashflows,
     };
     saveData(data);
-    console.log('[store] persist: data saved to storage');
   };
 
   // Persist import data
@@ -81,15 +73,12 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       importHistory: [], // TODO: Implement import history
     };
     saveImportData(importData);
-    console.log('[store] persistImportData: import data saved to storage');
   };
 
   // Initialize from localStorage
   const initialize = () => {
-    console.log('[store] initialize: loading data from storage');
     const data = loadData();
     const importData = loadImportData();
-    const projectionData = loadProjectionData();
     const budgetNote = loadBudgetNote();
     
     if (data) {
@@ -101,10 +90,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         editingCashflowId: null,
         transactions: importData?.transactions || [],
         patterns: importData?.patterns || [],
-        projectionScenarios: projectionData || [],
         budgetNote: budgetNote || '',
       });
-      console.log('[store] initialize: data loaded', data);
     } else {
       // Create default household if none exists
       const defaultHousehold: Household = {
@@ -119,10 +106,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         editingCashflowId: null,
         transactions: importData?.transactions || [],
         patterns: importData?.patterns || [],
-        projectionScenarios: projectionData || [],
         budgetNote: budgetNote || '',
       });
-      console.log('[store] initialize: created default household');
       persist();
     }
   };
@@ -136,7 +121,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     editingCashflowId: null,
     transactions: [],
     patterns: [],
-    projectionScenarios: [],
     budgetNote: '',
 
     // Initialize
@@ -144,14 +128,12 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
 
     // Household
     setHousehold: (household) => {
-      console.log('[store] setHousehold:', household);
       set({ household });
       persist();
     },
 
     // Accounts
     addAccount: (accountData) => {
-      console.log('[store] addAccount:', accountData);
       const household = get().household;
       if (!household) {
         console.error('[store] addAccount: no household set');
@@ -171,7 +153,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     updateAccount: (id, updates) => {
-      console.log('[store] updateAccount:', id, updates);
       set((state) => ({
         accounts: state.accounts.map((acc) =>
           acc.id === id
@@ -189,7 +170,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     deleteAccount: (id) => {
-      console.log('[store] deleteAccount:', id);
       set((state) => ({
         accounts: state.accounts.filter((acc) => acc.id !== id),
         editingAccountId: state.editingAccountId === id ? null : state.editingAccountId,
@@ -198,13 +178,11 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     setEditingAccount: (id) => {
-      console.log('[store] setEditingAccount:', id);
       set({ editingAccountId: id });
     },
 
     // Cashflows
     addCashflow: (cashflowData) => {
-      console.log('[store] addCashflow:', cashflowData);
       const household = get().household;
       if (!household) {
         console.error('[store] addCashflow: no household set');
@@ -222,7 +200,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     updateCashflow: (id, updates) => {
-      console.log('[store] updateCashflow:', id, updates);
       set((state) => ({
         cashflows: state.cashflows.map((cf) =>
           cf.id === id ? { ...cf, ...updates } : cf
@@ -232,7 +209,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     deleteCashflow: (id) => {
-      console.log('[store] deleteCashflow:', id);
       set((state) => ({
         cashflows: state.cashflows.filter((cf) => cf.id !== id),
         editingCashflowId: state.editingCashflowId === id ? null : state.editingCashflowId,
@@ -241,13 +217,11 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     setEditingCashflow: (id) => {
-      console.log('[store] setEditingCashflow:', id);
       set({ editingCashflowId: id });
     },
 
     // Holdings
     addHolding: (accountId, holdingData) => {
-      console.log('[store] addHolding:', accountId, holdingData);
       set((state) => ({
         accounts: state.accounts.map((acc) => {
           if (acc.id === accountId) {
@@ -270,7 +244,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     updateHolding: (accountId, holdingId, updates) => {
-      console.log('[store] updateHolding:', accountId, holdingId, updates);
       set((state) => ({
         accounts: state.accounts.map((acc) => {
           if (acc.id === accountId && acc.holdings) {
@@ -291,7 +264,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     deleteHolding: (accountId, holdingId) => {
-      console.log('[store] deleteHolding:', accountId, holdingId);
       set((state) => ({
         accounts: state.accounts.map((acc) => {
           if (acc.id === accountId && acc.holdings) {
@@ -308,7 +280,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     recalculateAccountBalance: (accountId) => {
-      console.log('[store] recalculateAccountBalance:', accountId);
       set((state) => ({
         accounts: state.accounts.map((acc) => {
           if (acc.id === accountId && acc.useHoldings && acc.holdings) {
@@ -329,21 +300,17 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     refreshHoldingPrices: async (accountId, onProgress, bypassCache = false) => {
-      console.log('[store] refreshHoldingPrices:', accountId, 'bypassCache:', bypassCache);
       const state = get();
       const account = state.accounts.find(a => a.id === accountId);
 
       if (!account || !account.useHoldings || !account.holdings || account.holdings.length === 0) {
-        console.log('[store] No holdings to refresh');
         return;
       }
 
       const tickers = account.holdings.map(h => h.ticker);
-      console.log('[store] Fetching prices for tickers:', tickers);
 
       try {
         const priceData = await fetchPrices(tickers, onProgress, bypassCache);
-        console.log('[store] Received price data:', priceData);
 
         const errors: string[] = []; // Collect errors here
 
@@ -391,7 +358,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
           throw new Error(errorMessage);
         }
 
-        console.log('[store] Prices refreshed successfully');
       } catch (error) {
         console.error('[store] Error during price refresh:', error);
         throw error; // Re-throw to be caught by UI
@@ -399,7 +365,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     refreshAllHoldingPrices: async (onProgress, bypassCache = true) => {
-      console.log('[store] refreshAllHoldingPrices: Refreshing prices for all accounts, bypassCache:', bypassCache);
       const state = get();
       
       // Collect all unique tickers from all accounts with holdings
@@ -409,7 +374,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       );
 
       if (accountsWithHoldings.length === 0) {
-        console.log('[store] No accounts with holdings to refresh');
         return;
       }
 
@@ -423,16 +387,13 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
       });
 
       const uniqueTickers = Array.from(tickerSet);
-      console.log('[store] Fetching prices for', uniqueTickers.length, 'unique tickers:', uniqueTickers);
 
       if (uniqueTickers.length === 0) {
-        console.log('[store] No tickers to refresh (only CASH holdings)');
         return;
       }
 
       try {
         const priceData = await fetchPrices(uniqueTickers, onProgress, bypassCache);
-        console.log('[store] Received price data for all holdings:', priceData);
 
         const errors: string[] = [];
 
@@ -451,9 +412,7 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
                   const oldPrice = holding.currentPrice;
                   const newPrice = priceInfo.price;
                   if (oldPrice !== newPrice) {
-                    console.log(`[store] Price updated for ${holding.ticker} in ${acc.name}: $${oldPrice.toFixed(2)} -> $${newPrice.toFixed(2)}`);
                   } else {
-                    console.log(`[store] Price unchanged for ${holding.ticker} in ${acc.name}: $${newPrice.toFixed(2)}`);
                   }
                   return {
                     ...holding,
@@ -469,7 +428,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
                 0
               );
 
-              console.log(`[store] Updated account ${acc.name}: balance ${acc.balance.toFixed(2)} -> ${balance.toFixed(2)} (${updatedHoldings.length} holdings)`);
 
               return {
                 ...acc,
@@ -487,7 +445,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         const totalBalance = newState.accounts
           .filter(a => a.kind === 'asset' && a.useHoldings)
           .reduce((sum, a) => sum + a.balance, 0);
-        console.log(`[store] Total investment account balance after refresh: $${totalBalance.toFixed(2)}`);
         
         persist();
 
@@ -498,7 +455,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
           throw new Error(errorMessage);
         }
 
-        console.log('[store] All prices refreshed successfully');
       } catch (error) {
         console.error('[store] Error during global price refresh:', error);
         throw error; // Re-throw to be caught by UI
@@ -507,7 +463,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
 
     // Import actions
     addTransactions: (transactions) => {
-      console.log('[store] addTransactions:', transactions.length);
       set((state) => ({
         transactions: [...state.transactions, ...transactions],
       }));
@@ -515,7 +470,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     updateTransaction: (id, updates) => {
-      console.log('[store] updateTransaction:', id, updates);
       set((state) => ({
         transactions: state.transactions.map((tx) =>
           tx.id === id ? { ...tx, ...updates } : tx
@@ -525,7 +479,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     deleteTransaction: (id) => {
-      console.log('[store] deleteTransaction:', id);
       set((state) => ({
         transactions: state.transactions.filter((tx) => tx.id !== id),
       }));
@@ -533,7 +486,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     addPattern: (pattern) => {
-      console.log('[store] addPattern:', pattern);
       set((state) => ({
         patterns: [...state.patterns, pattern],
       }));
@@ -541,7 +493,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     updatePattern: (id, updates) => {
-      console.log('[store] updatePattern:', id, updates);
       set((state) => ({
         patterns: state.patterns.map((p) =>
           p.id === id ? { ...p, ...updates } : p
@@ -551,7 +502,6 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
     },
 
     deletePattern: (id) => {
-      console.log('[store] deletePattern:', id);
       set((state) => ({
         patterns: state.patterns.filter((p) => p.id !== id),
       }));
@@ -560,56 +510,8 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
 
     persistImportData,
 
-    // Projection actions
-    persistProjectionData: () => {
-      const state = get();
-      saveProjectionData(state.projectionScenarios);
-      console.log('[store] persistProjectionData: projection data saved to storage');
-    },
-
-    addProjectionScenario: (scenarioData) => {
-      console.log('[store] addProjectionScenario:', scenarioData);
-      const household = get().household;
-      if (!household) {
-        console.error('[store] addProjectionScenario: no household set');
-        return;
-      }
-      const newScenario: ProjectionScenario = {
-        ...scenarioData,
-        id: generateId(),
-        householdId: household.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      set((state) => ({
-        projectionScenarios: [...state.projectionScenarios, newScenario],
-      }));
-      get().persistProjectionData();
-    },
-
-    updateProjectionScenario: (id, updates) => {
-      console.log('[store] updateProjectionScenario:', id, updates);
-      set((state) => ({
-        projectionScenarios: state.projectionScenarios.map((scenario) =>
-          scenario.id === id
-            ? { ...scenario, ...updates, updatedAt: new Date().toISOString() }
-            : scenario
-        ),
-      }));
-      get().persistProjectionData();
-    },
-
-    deleteProjectionScenario: (id) => {
-      console.log('[store] deleteProjectionScenario:', id);
-      set((state) => ({
-        projectionScenarios: state.projectionScenarios.filter((s) => s.id !== id),
-      }));
-      get().persistProjectionData();
-    },
-
     // Rename category across all transactions, patterns, and cashflows
     renameCategory: (oldName, newName) => {
-      console.log('[store] renameCategory:', oldName, '->', newName);
       const state = get();
       
       // Update transactions
@@ -646,18 +548,10 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
 
     // Reset
     reset: () => {
-      console.log('[store] reset: clearing all data');
       const defaultHousehold: Household = {
         id: generateId(),
         name: 'My Household',
         financialIndependenceYears: 25,
-        personProfiles: {
-          person1: {
-            nickname: undefined,
-            age: undefined,
-            annualIncome: undefined,
-          },
-        },
       };
       set({
         household: defaultHousehold,
@@ -667,12 +561,10 @@ export const useHouseholdStore = create<HouseholdStore>((set, get) => {
         editingCashflowId: null,
         transactions: [],
         patterns: [],
-        projectionScenarios: [],
         budgetNote: '',
       });
       persist();
       persistImportData();
-      saveProjectionData([]);
       saveBudgetNote('');
     },
   };

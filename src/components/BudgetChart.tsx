@@ -8,7 +8,6 @@ interface BudgetChartProps {
 }
 
 export const BudgetChart = ({ transactions = [], selectedMonth }: BudgetChartProps) => {
-  console.log('[BudgetChart] Rendering with transactions:', transactions.length, 'selectedMonth:', selectedMonth);
 
   // If a month is selected, show that month's data
   // Otherwise, show averages across all months

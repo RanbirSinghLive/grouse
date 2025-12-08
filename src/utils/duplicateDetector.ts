@@ -9,7 +9,6 @@ export const isDuplicate = (
   existingTransactions: Transaction[],
   existingCashflows: Cashflow[]
 ): boolean => {
-  console.log('[duplicateDetector] Checking for duplicates:', tx.fingerprint);
   
   // 1. Exact fingerprint match
   const exactMatch = existingTransactions.some(
@@ -17,21 +16,18 @@ export const isDuplicate = (
   );
   
   if (exactMatch) {
-    console.log('[duplicateDetector] Exact fingerprint match found');
     return true;
   }
   
   // 2. Fuzzy match: same date, similar amount, similar description
   const fuzzyMatch = findSimilarTransactions(tx, existingTransactions);
   if (fuzzyMatch.length > 0) {
-    console.log('[duplicateDetector] Fuzzy match found:', fuzzyMatch.length);
     return true;
   }
   
   // 3. Check against existing cashflows (for recurring transactions)
   const cashflowMatch = findMatchingCashflow(tx, existingCashflows);
   if (cashflowMatch) {
-    console.log('[duplicateDetector] Matches existing cashflow pattern');
     // Don't mark as duplicate, but could be flagged for review
   }
   
@@ -160,7 +156,6 @@ export const findDuplicates = (
   duplicates: Transaction[];
   unique: Transaction[];
 } => {
-  console.log('[duplicateDetector] Finding duplicates in batch of', transactions.length);
   
   const duplicates: Transaction[] = [];
   const unique: Transaction[] = [];
@@ -173,7 +168,6 @@ export const findDuplicates = (
     }
   }
   
-  console.log('[duplicateDetector] Found', duplicates.length, 'duplicates,', unique.length, 'unique');
   return { duplicates, unique };
 };
 

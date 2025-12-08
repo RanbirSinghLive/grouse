@@ -37,7 +37,6 @@ export const CashflowForm = () => {
 
   useEffect(() => {
     if (editingCashflow) {
-      console.log('[CashflowForm] Loading cashflow for editing:', editingCashflow);
       setFormData({
         name: editingCashflow.name,
         type: editingCashflow.type,
@@ -55,7 +54,6 @@ export const CashflowForm = () => {
         }, 100);
       }
     } else {
-      console.log('[CashflowForm] Resetting form for new cashflow');
       setFormData({
         name: '',
         type: 'income',
@@ -84,16 +82,13 @@ export const CashflowForm = () => {
     }
 
     setErrors(newErrors);
-    console.log('[CashflowForm] Validation result:', Object.keys(newErrors).length === 0 ? 'valid' : 'invalid', newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('[CashflowForm] Form submitted:', formData);
 
     if (!validate()) {
-      console.log('[CashflowForm] Validation failed');
       return;
     }
 
@@ -125,7 +120,6 @@ export const CashflowForm = () => {
   };
 
   const handleCancel = () => {
-    console.log('[CashflowForm] Form cancelled');
     setFormData({
       name: '',
       type: 'income',
@@ -335,7 +329,7 @@ export const CashflowForm = () => {
                 onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
               >
-                <option value="">All / Household</option>
+                <option value="">All / Joint</option>
                 {household.owners.map((owner) => (
                   <option key={owner} value={owner}>
                     {owner}

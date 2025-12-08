@@ -28,24 +28,10 @@ export const Dashboard = () => {
   const mortgageEquity = calcMortgageEquity(accounts);
   const totalAssets = calcTotalAssets(accounts);
 
-  console.log('[Dashboard] Rendering with', accounts.length, 'accounts and', transactions.length, 'transactions');
-  console.log('[Dashboard] Net worth:', netWorth.toFixed(2));
-  console.log('[Dashboard] Investment account balances:', accounts
-    .filter(a => a.kind === 'asset' && a.useHoldings)
-    .map(a => `${a.name}: $${a.balance.toFixed(2)}`)
-    .join(', '));
-
   const handleRefreshAllPrices = async () => {
     // Capture values BEFORE refresh (important: do this before any async operations)
     const netWorthBefore = calcNetWorth(accounts);
     const accountsBefore = JSON.parse(JSON.stringify(accounts)); // Deep copy for comparison
-    
-    console.log('[Dashboard] ====== STARTING PRICE REFRESH ======');
-    console.log('[Dashboard] Net worth before refresh:', netWorthBefore.toFixed(2));
-    console.log('[Dashboard] Investment balances before:', accounts
-      .filter(a => a.kind === 'asset' && a.useHoldings)
-      .map(a => `${a.name}: $${a.balance.toFixed(2)}`)
-      .join(', '));
     
     setIsRefreshing(true);
     setRefreshProgress(null);
@@ -54,7 +40,6 @@ export const Dashboard = () => {
       await refreshAllHoldingPrices(
         (current, total, ticker) => {
           setRefreshProgress({ current, total, ticker });
-          console.log(`[Dashboard] Progress: ${current}/${total} - ${ticker}`);
         }
       );
       setRefreshProgress(null);
@@ -63,17 +48,8 @@ export const Dashboard = () => {
       setTimeout(() => {
         const updatedAccounts = useHouseholdStore.getState().accounts;
         const updatedNetWorth = calcNetWorth(updatedAccounts);
-        console.log('[Dashboard] ====== REFRESH COMPLETE ======');
-        console.log('[Dashboard] Net worth before refresh:', netWorthBefore.toFixed(2));
-        console.log('[Dashboard] Net worth after refresh:', updatedNetWorth.toFixed(2));
-        console.log('[Dashboard] Net worth change:', (updatedNetWorth - netWorthBefore).toFixed(2));
-        console.log('[Dashboard] Investment balances after:', updatedAccounts
-          .filter(a => a.kind === 'asset' && a.useHoldings)
-          .map(a => `${a.name}: $${a.balance.toFixed(2)}`)
-          .join(', '));
         
         // Check if prices actually changed by comparing holdings
-        console.log('[Dashboard] ====== CHECKING FOR PRICE CHANGES ======');
         let priceChangesFound = false;
         accountsBefore
           .filter((a: Account) => a.kind === 'asset' && a.useHoldings && a.holdings)
@@ -85,9 +61,7 @@ export const Dashboard = () => {
                 if (updatedHolding) {
                   if (updatedHolding.currentPrice !== holding.currentPrice) {
                     priceChangesFound = true;
-                    console.log(`[Dashboard] ✓ PRICE CHANGED: ${holding.ticker} in ${account.name}: $${holding.currentPrice.toFixed(2)} -> $${updatedHolding.currentPrice.toFixed(2)}`);
                   } else {
-                    console.log(`[Dashboard] - Price unchanged: ${holding.ticker} in ${account.name}: $${holding.currentPrice.toFixed(2)}`);
                   }
                 }
               });
@@ -95,10 +69,6 @@ export const Dashboard = () => {
           });
         
         if (!priceChangesFound) {
-          console.log('[Dashboard] ⚠️ No price changes detected. This could mean:');
-          console.log('[Dashboard]   1. Market prices haven\'t changed');
-          console.log('[Dashboard]   2. Cache was used (check store logs for "[store] Price updated" messages)');
-          console.log('[Dashboard]   3. API returned same prices');
         }
       }, 200);
       

@@ -9,7 +9,6 @@ import { Settings } from './pages/Settings';
 
 const Navigation = () => {
   const location = useLocation();
-  console.log('[App] Current location:', location.pathname);
 
   return (
     <nav className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
@@ -81,7 +80,6 @@ function App() {
   const initialize = useHouseholdStore((state) => state.initialize);
 
   useEffect(() => {
-    console.log('[App] Initializing store');
     initialize();
   }, [initialize]);
 

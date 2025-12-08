@@ -69,7 +69,6 @@ export const getAccountCategory = (account: Account): AssetCategory => {
 };
 
 export const groupAccountsByCategory = (accounts: Account[]): Record<AssetCategory, number> => {
-  console.log(`[calculations] groupAccountsByCategory: processing ${accounts.length} accounts`);
   const grouped: Record<AssetCategory, number> = {
     'Cash & Cash-like': 0,
     'Registered Investments': 0,
@@ -85,7 +84,6 @@ export const groupAccountsByCategory = (accounts: Account[]): Record<AssetCatego
       grouped[category] += account.balance;
     });
 
-  console.log(`[calculations] groupAccountsByCategory: result`, grouped);
   return grouped;
 };
 
@@ -240,13 +238,10 @@ export const calculateMonthlyTotals = (
 export const calculateCategoryAverages = (
   transactions: Transaction[]
 ): CategoryAverage[] => {
-  console.log('[calculations] calculateCategoryAverages: processing', transactions.length, 'transactions');
   
   const availableMonths = getAvailableMonths(transactions);
-  console.log('[calculations] Available months:', availableMonths);
   
   if (availableMonths.length === 0) {
-    console.log('[calculations] No months with data found');
     return [];
   }
   
@@ -289,7 +284,6 @@ export const calculateCategoryAverages = (
   // Calculate averages and trends
   // Use total months with ANY data as denominator for more realistic budgeting
   const totalMonthsWithData = availableMonths.length;
-  console.log('[calculations] Total months with any transaction data:', totalMonthsWithData);
   
   const averages: CategoryAverage[] = [];
   
@@ -344,7 +338,6 @@ export const calculateCategoryAverages = (
     });
   });
   
-  console.log('[calculations] calculateCategoryAverages: result', averages);
   return averages.sort((a, b) => {
     // Sort by type (income first), then by average amount (descending)
     if (a.type !== b.type) {
@@ -383,7 +376,6 @@ export const prepareSpendingOverTimeData = (
   transactions: Transaction[],
   selectedCategories?: string[]
 ): MonthlySpendingData[] => {
-  console.log('[calculations] prepareSpendingOverTimeData: processing', transactions.length, 'transactions');
   const availableMonths = getAvailableMonths(transactions);
   
   if (availableMonths.length === 0) return [];
@@ -431,7 +423,6 @@ export const prepareSpendingOverTimeData = (
     return result;
   });
   
-  console.log('[calculations] prepareSpendingOverTimeData: result', data);
   return data;
 };
 
@@ -446,7 +437,6 @@ export const prepareMonthlyComparisonData = (
   transactions: Transaction[],
   monthsToCompare: string[]
 ): MonthlyComparisonData[] => {
-  console.log('[calculations] prepareMonthlyComparisonData: comparing', monthsToCompare.length, 'months');
   
   if (monthsToCompare.length === 0) return [];
   
@@ -492,7 +482,6 @@ export const prepareMonthlyComparisonData = (
     return totalB - totalA;
   });
   
-  console.log('[calculations] prepareMonthlyComparisonData: result', data);
   return data;
 };
 
@@ -507,7 +496,6 @@ export type CategoryBreakdownData = {
 export const prepareCategoryBreakdownData = (
   transactions: Transaction[]
 ): CategoryBreakdownData[] => {
-  console.log('[calculations] prepareCategoryBreakdownData: processing', transactions.length, 'transactions');
   
   const averages = calculateCategoryAverages(transactions);
   
@@ -527,7 +515,6 @@ export const prepareCategoryBreakdownData = (
     };
   });
   
-  console.log('[calculations] prepareCategoryBreakdownData: result', data);
   return data;
 };
 
@@ -537,47 +524,38 @@ export const prepareCategoryBreakdownData = (
 
 // Calculate average monthly income from transactions
 export const calcMonthlyIncomeFromTransactions = (transactions: Transaction[]): number => {
-  console.log('[calculations] calcMonthlyIncomeFromTransactions: processing', transactions.length, 'transactions');
   const averages = calculateCategoryAverages(transactions);
   const incomeTotal = averages
     .filter(avg => avg.type === 'income')
     .reduce((sum, avg) => sum + avg.averageAmount, 0);
-  console.log('[calculations] calcMonthlyIncomeFromTransactions: result', incomeTotal);
   return incomeTotal;
 };
 
 // Calculate average monthly expenses from transactions
 export const calcMonthlyExpensesFromTransactions = (transactions: Transaction[]): number => {
-  console.log('[calculations] calcMonthlyExpensesFromTransactions: processing', transactions.length, 'transactions');
   const averages = calculateCategoryAverages(transactions);
   const expensesTotal = averages
     .filter(avg => avg.type === 'expense')
     .reduce((sum, avg) => sum + avg.averageAmount, 0);
-  console.log('[calculations] calcMonthlyExpensesFromTransactions: result', expensesTotal);
   return expensesTotal;
 };
 
 // Calculate average monthly cashflow from transactions
 export const calcMonthlyCashflowFromTransactions = (transactions: Transaction[]): number => {
-  console.log('[calculations] calcMonthlyCashflowFromTransactions: processing', transactions.length, 'transactions');
   const income = calcMonthlyIncomeFromTransactions(transactions);
   const expenses = calcMonthlyExpensesFromTransactions(transactions);
   const cashflow = income - expenses;
-  console.log('[calculations] calcMonthlyCashflowFromTransactions: result', cashflow);
   return cashflow;
 };
 
 // Calculate savings rate from transactions
 export const calcSavingsRateFromTransactions = (transactions: Transaction[]): number => {
-  console.log('[calculations] calcSavingsRateFromTransactions: processing', transactions.length, 'transactions');
   const income = calcMonthlyIncomeFromTransactions(transactions);
   if (income === 0) {
-    console.log('[calculations] calcSavingsRateFromTransactions: no income, returning 0');
     return 0;
   }
   const cashflow = calcMonthlyCashflowFromTransactions(transactions);
   const savingsRate = (cashflow / income) * 100;
-  console.log('[calculations] calcSavingsRateFromTransactions: result', savingsRate);
   return savingsRate;
 };
 
@@ -586,15 +564,12 @@ export const calcEmergencyFundCoverageFromTransactions = (
   accounts: Account[],
   transactions: Transaction[]
 ): number => {
-  console.log('[calculations] calcEmergencyFundCoverageFromTransactions: processing');
   const liquidAssets = calcLiquidAssets(accounts);
   const monthlyExpenses = calcMonthlyExpensesFromTransactions(transactions);
   if (monthlyExpenses <= 0) {
-    console.log('[calculations] calcEmergencyFundCoverageFromTransactions: no expenses, returning Infinity');
     return Infinity;
   }
   const coverage = liquidAssets / monthlyExpenses;
-  console.log('[calculations] calcEmergencyFundCoverageFromTransactions: result', coverage);
   return coverage;
 };
 
@@ -606,10 +581,8 @@ export const calcDebtToIncomeRatioFromTransactions = (
   accounts: Account[],
   transactions: Transaction[]
 ): number => {
-  console.log('[calculations] calcDebtToIncomeRatioFromTransactions: processing');
   const monthlyIncome = calcMonthlyIncomeFromTransactions(transactions);
   if (monthlyIncome === 0) {
-    console.log('[calculations] calcDebtToIncomeRatioFromTransactions: no income, returning 0');
     return 0;
   }
 
@@ -619,7 +592,6 @@ export const calcDebtToIncomeRatioFromTransactions = (
     .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0);
 
   const ratio = (monthlyDebtPayments / monthlyIncome) * 100;
-  console.log('[calculations] calcDebtToIncomeRatioFromTransactions: result', ratio);
   return ratio;
 };
 

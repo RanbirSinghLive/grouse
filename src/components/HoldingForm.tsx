@@ -32,7 +32,6 @@ export const HoldingForm = ({ accountId, holdingId, onCancel, onSuccess }: Holdi
 
   useEffect(() => {
     if (holding) {
-      console.log('[HoldingForm] Loading holding for editing:', holding);
       setFormData({
         ticker: holding.ticker,
         shares: holding.shares,
@@ -41,7 +40,6 @@ export const HoldingForm = ({ accountId, holdingId, onCancel, onSuccess }: Holdi
       });
       setErrors({});
     } else {
-      console.log('[HoldingForm] Resetting form for new holding');
       setFormData({
         ticker: '',
         shares: 0,
@@ -68,16 +66,13 @@ export const HoldingForm = ({ accountId, holdingId, onCancel, onSuccess }: Holdi
     }
 
     setErrors(newErrors);
-    console.log('[HoldingForm] Validation result:', Object.keys(newErrors).length === 0 ? 'valid' : 'invalid', newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('[HoldingForm] Form submitted:', formData);
 
     if (!validate()) {
-      console.log('[HoldingForm] Validation failed');
       return;
     }
 
@@ -97,7 +92,6 @@ export const HoldingForm = ({ accountId, holdingId, onCancel, onSuccess }: Holdi
   };
 
   const handleBlur = (field: keyof typeof formData) => {
-    console.log('[HoldingForm] Field blurred:', field);
     if (field === 'shares' && formData.shares <= 0) {
       setErrors({ ...errors, shares: 'Shares must be > 0' });
     }

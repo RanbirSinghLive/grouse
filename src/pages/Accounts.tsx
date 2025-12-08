@@ -13,18 +13,15 @@ export const Accounts = () => {
     : accounts;
 
   const handleEdit = (id: string) => {
-    console.log('[Accounts] Editing account:', id);
     setEditingAccount(id);
   };
 
   const handleDelete = (id: string) => {
     if (window.confirm('Are you sure you want to delete this account?')) {
-      console.log('[Accounts] Deleting account:', id);
       deleteAccount(id);
     }
   };
 
-  console.log('[Accounts] Rendering with', accounts.length, 'accounts');
 
   return (
     <div>
@@ -95,7 +92,7 @@ export const Accounts = () => {
                   ${account.balance.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 {owners.length > 0 && (
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{account.owner || 'All / Household'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{account.owner || 'All / Joint'}</td>
                 )}
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   <div className="flex gap-3">

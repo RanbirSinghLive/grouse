@@ -9,13 +9,12 @@ export const Settings = () => {
   const [householdName, setHouseholdName] = useState(household?.name || '');
   const [householdProvince, setHouseholdProvince] = useState<Province | ''>(household?.province || '');
   const [financialIndependenceYears, setFinancialIndependenceYears] = useState(household?.financialIndependenceYears || 25);
-  const [newOwner, setNewOwner] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [categoryEditValue, setCategoryEditValue] = useState<string>('');
   
   // Owners management (replaces person profiles)
-  const [owners, setOwners] = useState<string[]>(household?.owners || ['Ranbir', 'Joint', 'Household']);
+  const [owners, setOwners] = useState<string[]>(household?.owners || ['Ranbir', 'Joint']);
 
   // Get all unique categories from transactions, patterns, and cashflows
   const allCategories = useMemo(() => {
@@ -53,28 +52,27 @@ export const Settings = () => {
         if (personProfiles.person2?.nickname?.trim()) {
           migratedOwners.push(personProfiles.person2.nickname.trim());
         }
-        migratedOwners.push('Joint', 'Household');
+        migratedOwners.push('Joint');
         setOwners(migratedOwners);
         // Remove personProfiles
         const { personProfiles: _, ...householdWithoutProfiles } = household as any;
         setHousehold({ ...householdWithoutProfiles, owners: migratedOwners });
       } else {
-        setOwners(['Ranbir', 'Joint', 'Household']);
+        setOwners(['Ranbir', 'Joint']);
       }
     }
   }, [household, setHousehold]);
   
   const handleSaveOwners = () => {
     if (!household) return;
-    // Filter out empty names and ensure Joint/Household are included
-    const validOwners = owners.filter(o => o.trim() && o.trim() !== 'Joint' && o.trim() !== 'Household');
-    validOwners.push('Joint', 'Household');
+    // Filter out empty names and ensure Joint is included
+    const validOwners = owners.filter(o => o.trim() && o.trim() !== 'Joint');
+    validOwners.push('Joint');
     
     setHousehold({
       ...household,
       owners: validOwners,
     });
-    console.log('[Settings] Owners saved:', validOwners);
     alert('Owners saved!');
   };
 
@@ -84,8 +82,8 @@ export const Settings = () => {
 
   const handleRemoveOwner = (index: number) => {
     const ownerName = owners[index];
-    if (ownerName === 'Joint' || ownerName === 'Household') {
-      alert('Cannot remove Joint or Household options');
+    if (ownerName === 'Joint') {
+      alert('Cannot remove Joint option');
       return;
     }
     if (window.confirm(`Are you sure you want to remove "${ownerName}"?`)) {
@@ -117,7 +115,6 @@ export const Settings = () => {
       return;
     }
 
-    console.log('[Settings] Renaming category:', oldName, '->', newName);
     renameCategory(oldName, newName);
     setEditingCategory(null);
     setCategoryEditValue('');
@@ -130,7 +127,6 @@ export const Settings = () => {
 
   const handleSaveHousehold = () => {
     if (!household) return;
-    console.log('[Settings] Saving household:', householdName, 'province:', householdProvince, 'FI years:', financialIndependenceYears);
     setHousehold({
       ...household,
       name: householdName,
@@ -140,33 +136,7 @@ export const Settings = () => {
     alert('Household information saved!');
   };
 
-  const handleAddOwner = () => {
-    if (!newOwner.trim() || !household) return;
-    const owners = household.owners || [];
-    if (owners.includes(newOwner.trim())) {
-      alert('Owner already exists!');
-      return;
-    }
-    console.log('[Settings] Adding owner:', newOwner);
-    setHousehold({
-      ...household,
-      owners: [...owners, newOwner.trim()],
-    });
-    setNewOwner('');
-  };
-
-  const handleRemoveOwner = (owner: string) => {
-    if (!household) return;
-    const owners = household.owners || [];
-    console.log('[Settings] Removing owner:', owner);
-    setHousehold({
-      ...household,
-      owners: owners.filter(o => o !== owner),
-    });
-  };
-
   const handleExport = () => {
-    console.log('[Settings] Exporting data');
     const data = exportData();
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -179,7 +149,6 @@ export const Settings = () => {
 
   const handleImport = async () => {
     if (!importFile) return;
-    console.log('[Settings] Importing data');
     try {
       const text = await importFile.text();
       importData(text);
@@ -198,14 +167,12 @@ export const Settings = () => {
 
   const handleReset = () => {
     if (window.confirm('Are you sure you want to reset all data? This cannot be undone!')) {
-      console.log('[Settings] Resetting all data');
       clearData();
       reset();
       alert('All data has been reset.');
     }
   };
 
-  console.log('[Settings] Rendering');
 
   // Calculate financial independence target if we have expense data
   const monthlyExpenses = useMemo(() => {
@@ -295,7 +262,7 @@ export const Settings = () => {
           Owners
         </h2>
         <p className="text-sm text-gray-600 mb-4">
-          Manage the people in your household. These names will be used as account owners throughout the app. "Joint" and "Household" are always available.
+          Manage the people in your household. These names will be used as account owners throughout the app. "Joint" is always available.
         </p>
         <div className="space-y-3">
           {owners.map((owner, index) => (
@@ -305,12 +272,12 @@ export const Settings = () => {
                 value={owner}
                 onChange={(e) => handleUpdateOwner(index, e.target.value)}
                 placeholder="Owner name"
-                disabled={owner === 'Joint' || owner === 'Household'}
+                disabled={owner === 'Joint'}
                 className={`flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  owner === 'Joint' || owner === 'Household' ? 'bg-gray-100 cursor-not-allowed' : ''
+                  owner === 'Joint' ? 'bg-gray-100 cursor-not-allowed' : ''
                 }`}
               />
-              {(owner !== 'Joint' && owner !== 'Household') && (
+              {owner !== 'Joint' && (
                 <button
                   onClick={() => handleRemoveOwner(index)}
                   className="px-4 py-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
@@ -415,47 +382,6 @@ export const Settings = () => {
             })}
           </div>
         )}
-      </div>
-
-      {/* Owners Management */}
-      <div className="bg-gradient-to-br from-white to-purple-50 p-8 rounded-2xl shadow-lg border-2 border-purple-200 mb-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-          <span className="text-2xl">👥</span>
-          Owners
-        </h2>
-        <div className="space-y-4">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newOwner}
-              onChange={(e) => setNewOwner(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleAddOwner()}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
-              placeholder="Enter owner name (e.g., Person 1, Person 2, Joint)"
-            />
-            <button
-              onClick={handleAddOwner}
-              className="px-8 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-purple-800 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
-            >
-              ➕ Add Owner
-            </button>
-          </div>
-          {household?.owners && household.owners.length > 0 && (
-            <div className="space-y-2">
-              {household.owners.map((owner) => (
-                <div key={owner} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                  <span>{owner}</span>
-                  <button
-                    onClick={() => handleRemoveOwner(owner)}
-                    className="text-red-600 hover:text-red-800"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Data Export/Import */}

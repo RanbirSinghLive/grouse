@@ -18,25 +18,21 @@ export const HoldingsList = ({ account }: HoldingsListProps) => {
 
   const handleDelete = (holdingId: string) => {
     if (window.confirm('Are you sure you want to delete this holding?')) {
-      console.log('[HoldingsList] Deleting holding:', holdingId);
       deleteHolding(account.id, holdingId);
     }
   };
 
   const handleEdit = (holdingId: string) => {
-    console.log('[HoldingsList] Editing holding:', holdingId);
     setEditingHoldingId(holdingId);
     setShowAddForm(false);
   };
 
   const handleAddNew = () => {
-    console.log('[HoldingsList] Adding new holding');
     setEditingHoldingId(null);
     setShowAddForm(true);
   };
 
   const handleFormSuccess = () => {
-    console.log('[HoldingsList] Form submitted successfully');
     setEditingHoldingId(null);
     setShowAddForm(false);
     // Recalculate balance after adding/editing
@@ -44,13 +40,11 @@ export const HoldingsList = ({ account }: HoldingsListProps) => {
   };
 
   const handleFormCancel = () => {
-    console.log('[HoldingsList] Form cancelled');
     setEditingHoldingId(null);
     setShowAddForm(false);
   };
 
   const handleRefreshPrices = async () => {
-    console.log('[HoldingsList] Refreshing prices (bypassing cache)');
     setIsRefreshing(true);
     setRefreshProgress(null);
 
@@ -79,7 +73,6 @@ export const HoldingsList = ({ account }: HoldingsListProps) => {
 
   const totalAccountValue = holdings.reduce((sum, h) => sum + calculateTotalValue(h), 0);
 
-  console.log('[HoldingsList] Rendering for account:', account.name, 'holdings:', holdings.length);
 
   if (!account.useHoldings) {
     return null; // Don't show holdings if account doesn't use holdings

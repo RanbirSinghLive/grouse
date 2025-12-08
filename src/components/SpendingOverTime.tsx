@@ -8,7 +8,6 @@ interface SpendingOverTimeProps {
 }
 
 export const SpendingOverTime = ({ transactions }: SpendingOverTimeProps) => {
-  console.log('[SpendingOverTime] Rendering with transactions:', transactions.length);
   
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   
@@ -137,6 +136,7 @@ export const SpendingOverTime = ({ transactions }: SpendingOverTimeProps) => {
     </div>
   );
 };
+
 
 
 

@@ -52,7 +52,6 @@ export const AccountForm = () => {
 
   useEffect(() => {
     if (editingAccount) {
-      console.log('[AccountForm] Loading account for editing:', editingAccount);
       setFormData({
         name: editingAccount.name,
         kind: editingAccount.kind,
@@ -68,7 +67,6 @@ export const AccountForm = () => {
       });
       setErrors({});
     } else {
-      console.log('[AccountForm] Resetting form for new account');
       setFormData({
         name: '',
         kind: 'asset',
@@ -112,16 +110,13 @@ export const AccountForm = () => {
     }
 
     setErrors(newErrors);
-    console.log('[AccountForm] Validation result:', Object.keys(newErrors).length === 0 ? 'valid' : 'invalid', newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('[AccountForm] Form submitted:', formData);
 
     if (!validate()) {
-      console.log('[AccountForm] Validation failed');
       return;
     }
 
@@ -163,7 +158,6 @@ export const AccountForm = () => {
   };
 
   const handleCancel = () => {
-    console.log('[AccountForm] Form cancelled');
     setFormData({
       name: '',
       kind: 'asset',
@@ -272,7 +266,7 @@ export const AccountForm = () => {
               onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
             >
-              <option value="">All / Household</option>
+              <option value="">All / Joint</option>
               {household.owners.map((owner) => (
                 <option key={owner} value={owner}>
                   {owner}
