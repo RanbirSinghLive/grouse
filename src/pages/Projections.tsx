@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { projectNetWorth, createDefaultScenario } from '../utils/projections';
 import type { ProjectionScenario, ProjectionResult } from '../types/models';
@@ -13,6 +14,7 @@ import { GrowthDriversAnalysis } from '../components/GrowthDriversAnalysis';
 import type { Account } from '../types/models';
 
 export const Projections = () => {
+  const navigate = useNavigate();
   const {
     household,
     accounts,
@@ -22,6 +24,7 @@ export const Projections = () => {
     updateProjectionScenario,
     deleteProjectionScenario,
     updateAccount,
+    setHousehold,
   } = useHouseholdStore();
 
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
@@ -92,8 +95,39 @@ export const Projections = () => {
     return accounts.some(acc => acc.type === 'resp');
   }, [accounts]);
 
-
-
+  // Migration: Update RS accounts to Ranbir and remove personProfiles on component mount
+  useEffect(() => {
+    if (household && accounts.length > 0) {
+      // Update RS accounts to Ranbir
+      accounts.forEach(account => {
+        if (account.owner && (account.owner.toLowerCase() === 'rs' || account.owner === 'RS')) {
+          console.log(`[Migration] Updating account "${account.name}" owner from "${account.owner}" to "Ranbir"`);
+          updateAccount(account.id, { owner: 'Ranbir' });
+        }
+      });
+      
+      // Update household owners if needed
+      if (household.owners && household.owners.some(o => o.toLowerCase() === 'rs' || o === 'RS')) {
+        const updatedOwners = household.owners.map(o => 
+          (o.toLowerCase() === 'rs' || o === 'RS') ? 'Ranbir' : o
+        );
+        setHousehold({ ...household, owners: updatedOwners });
+        console.log('[Migration] Updated household owners:', updatedOwners);
+      } else if (!household.owners || household.owners.length === 0) {
+        // Initialize owners if not set
+        const defaultOwners = ['Ranbir', 'Joint', 'Household'];
+        setHousehold({ ...household, owners: defaultOwners });
+        console.log('[Migration] Initialized default owners:', defaultOwners);
+      }
+      
+      // Remove personProfiles if they exist (legacy data migration)
+      if ((household as any).personProfiles) {
+        const { personProfiles, ...householdWithoutProfiles } = household as any;
+        setHousehold(householdWithoutProfiles);
+        console.log('[Migration] Removed personProfiles from household');
+      }
+    }
+  }, [household?.id, accounts.length]); // Run when household or accounts change
 
   const handleCreateScenario = () => {
     if (!household) {
@@ -107,26 +141,39 @@ export const Projections = () => {
   };
 
 
-  // Check if Person 2 exists
-  const hasPerson2 = !!household?.personProfiles?.person2;
-
-  // Helper functions to get display names (nickname if available, otherwise "Person 1"/"Person 2")
+  // Get owner names from owners array
   const getPerson1Name = () => {
-    return household?.personProfiles?.person1?.nickname?.trim() || 'Person 1';
+    return household?.owners?.[0] || 'Person 1';
   };
 
   const getPerson2Name = () => {
-    return household?.personProfiles?.person2?.nickname?.trim() || 'Person 2';
+    return household?.owners?.[1] || 'Person 2';
   };
   
-  // Helper to determine if account belongs to person 1 or person 2
-  const getAccountOwnerPerson = (account: Account): 'person1' | 'person2' | 'joint' => {
-    if (!account.owner) return 'person1';
-    const owner = account.owner.toLowerCase();
-    if (owner.includes('1') || owner === 'person 1') return 'person1';
-    if (owner.includes('2') || owner === 'person 2') return 'person2';
-    return 'joint';
+  const hasPerson2 = household?.owners && household.owners.length > 1 && household.owners[1] !== 'Joint' && household.owners[1] !== 'Household';
+  
+  
+  // Helper to get owner name from account (returns actual name, not person1/person2)
+  const getAccountOwnerName = (account: Account): string => {
+    if (!account.owner) return getPerson1Name();
+    return account.owner;
   };
+  
+  // Helper to map owner name to person1/person2 for projection assumptions (backward compatibility)
+  const getOwnerKey = (ownerName: string): 'person1' | 'person2' | string => {
+    const person1Name = getPerson1Name();
+    const person2Name = getPerson2Name();
+    
+    if (ownerName === person1Name || ownerName.toLowerCase() === person1Name.toLowerCase()) {
+      return 'person1';
+    }
+    if (ownerName === person2Name || ownerName.toLowerCase() === person2Name.toLowerCase()) {
+      return 'person2';
+    }
+    // For new owners beyond person1/person2, use the owner name directly
+    return ownerName;
+  };
+  
   
   // Toggle account expansion
   const toggleAccountExpansion = (accountId: string) => {
@@ -387,9 +434,9 @@ export const Projections = () => {
                                   </span>
                                 </div>
                                 <div className="text-xs text-gray-600">
-                                  {person1Income && `Person 1: $${(person1Income).toLocaleString('en-CA')}/year`}
+                                  {person1Income && `${getPerson1Name()}: $${(person1Income).toLocaleString('en-CA')}/year`}
                                   {person1Income && person2Income && ', '}
-                                  {person2Income && `Person 2: $${(person2Income).toLocaleString('en-CA')}/year`}
+                                  {person2Income && `${getPerson2Name()}: $${(person2Income).toLocaleString('en-CA')}/year`}
                                 </div>
                                 <div className="text-xs text-gray-500 mt-1">
                                   Transaction avg: ${(autoCalculatedTaxableIncome).toLocaleString('en-CA')}/year
@@ -433,9 +480,9 @@ export const Projections = () => {
                                   </span>
                                 </div>
                                 <div className="text-xs text-gray-600">
-                                  {person1Expenses && `Person 1: $${(person1Expenses).toLocaleString('en-CA')}/year`}
+                                  {person1Expenses && `${getPerson1Name()}: $${(person1Expenses).toLocaleString('en-CA')}/year`}
                                   {person1Expenses && person2Expenses && ', '}
-                                  {person2Expenses && `Person 2: $${(person2Expenses).toLocaleString('en-CA')}/year`}
+                                  {person2Expenses && `${getPerson2Name()}: $${(person2Expenses).toLocaleString('en-CA')}/year`}
                                 </div>
                                 <div className="text-xs text-gray-500 mt-1">
                                   Transaction avg: ${(autoCalculatedMonthlyExpenses * 12).toLocaleString('en-CA')}/year (excl. mortgage)
@@ -902,6 +949,7 @@ export const Projections = () => {
                           result={projectionResult}
                           startingNetWorth={projectionResult.summary.startingNetWorth}
                           accounts={accounts}
+                          inflationRate={currentScenario?.assumptions.inflationRate || 0.02}
                         />
                       </div>
 
@@ -1102,20 +1150,69 @@ export const Projections = () => {
                   defaultExpanded={true}
                   helpText="View and configure accounts for this projection scenario. New accounts from Accounts tab will appear here automatically."
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-4">
                     {accounts.length === 0 ? (
                       <div className="text-sm text-gray-500 italic text-center py-4">
                         No accounts configured. Add accounts in the Accounts tab.
                       </div>
-                    ) : (
-                      accounts.map((account) => {
-                        const isExpanded = expandedAccounts.has(account.id);
-                        const accountOverride = getNestedAssumption(['accountOverrides', account.id]);
-                        const hasOverride = !!accountOverride;
-                        const accountOwner = getAccountOwnerPerson(account);
+                    ) : (() => {
+                      // Group accounts by owner name
+                      const ownerGroups: { [ownerName: string]: Account[] } = {};
+                      const jointAccounts: Account[] = [];
+                      
+                      const person1Name = getPerson1Name();
+                      const person2Name = getPerson2Name();
+                      
+                      accounts.forEach(account => {
+                        const ownerName = account.owner?.trim() || person1Name;
+                        // Check if it's a joint/household account
+                        if (ownerName.toLowerCase() === 'joint' || ownerName.toLowerCase() === 'household' || ownerName.toLowerCase() === 'all') {
+                          jointAccounts.push(account);
+                        } else {
+                          // Group by owner name
+                          if (!ownerGroups[ownerName]) {
+                            ownerGroups[ownerName] = [];
+                          }
+                          ownerGroups[ownerName].push(account);
+                        }
+                      });
+                      
+                      const renderAccountGroup = (groupName: string, groupAccounts: Account[], isPersonAccount: boolean) => {
+                        if (groupAccounts.length === 0) return null;
                         
                         return (
-                          <div key={account.id} className="bg-white rounded-lg border-2 border-gray-200 overflow-hidden">
+                          <div key={groupName} className="space-y-2">
+                            <div className="flex items-center justify-between pb-2 border-b border-gray-300">
+                              <h4 className="font-semibold text-sm text-gray-900">{groupName}</h4>
+                              {isPersonAccount && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate('/settings');
+                                    // Scroll to person profile section after navigation
+                                    setTimeout(() => {
+                                      const element = document.getElementById('person-profiles');
+                                      if (element) {
+                                        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                      }
+                                    }, 300);
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
+                                >
+                                  View Profile
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                            {groupAccounts.map((account) => {
+                              const isExpanded = expandedAccounts.has(account.id);
+                              const accountOverride = getNestedAssumption(['accountOverrides', account.id]);
+                              const hasOverride = !!accountOverride;
+                              
+                              return (
+                                <div key={account.id} className="bg-white rounded-lg border-2 border-gray-200 overflow-hidden">
                             {/* Account Header Row - Clickable */}
                             <div
                               className="flex items-center justify-between p-3 hover:bg-gray-50 cursor-pointer transition-colors"
@@ -1126,9 +1223,6 @@ export const Projections = () => {
                                 <div className="text-sm text-gray-600">{formatAccountType(account.type)}</div>
                                 <div className="text-sm font-semibold text-gray-900">
                                   ${account.balance.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </div>
-                                <div className="text-xs text-gray-600">
-                                  {account.owner || 'All / Household'}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
@@ -1159,7 +1253,9 @@ export const Projections = () => {
                                     </label>
                                     {(() => {
                                       // For RRSP, calculate default as 2026 limit ($33,810) minus DCPP contribution
-                                      const currentValue = getNestedAssumption(['contributionRooms', account.type, accountOwner]);
+                                      const ownerName = getAccountOwnerName(account);
+                                      const ownerKey = getOwnerKey(ownerName);
+                                      const currentValue = getNestedAssumption(['contributionRooms', account.type, ownerKey]);
                                       const RRSP_2026_LIMIT = 33810;
                                       const dcppContribution = currentScenario?.assumptions.dcpp?.annualContribution || 0;
                                       const calculatedDefault = account.type === 'rrsp' ? Math.max(0, RRSP_2026_LIMIT - dcppContribution) : undefined;
@@ -1168,7 +1264,7 @@ export const Projections = () => {
                                       const displayValue = currentValue ?? calculatedDefault;
                                       
                                       // Build help text
-                                      let helpText = `Enter ${account.type.toUpperCase()} contribution room for ${accountOwner === 'person1' ? getPerson1Name() : accountOwner === 'person2' ? getPerson2Name() : 'joint'}`;
+                                      let helpText = `Enter ${account.type.toUpperCase()} contribution room for ${ownerName}`;
                                       if (account.type === 'rrsp') {
                                         if (currentValue === undefined && calculatedDefault !== undefined) {
                                           helpText = `Default: $${calculatedDefault.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (2026 limit $${RRSP_2026_LIMIT.toLocaleString('en-CA')} - DCPP $${dcppContribution.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})`;
@@ -1184,10 +1280,11 @@ export const Projections = () => {
                                           onChange={(val) => {
                                             // If user clears the field and it was using the default, set to undefined
                                             // Otherwise, save the value they entered
+                                            // Use ownerKey (maps to person1/person2 for backward compatibility)
                                             if (val === undefined || val === null) {
-                                              handleNestedAssumptionChange(['contributionRooms', account.type, accountOwner], undefined);
+                                              handleNestedAssumptionChange(['contributionRooms', account.type, ownerKey], undefined);
                                             } else {
-                                              handleNestedAssumptionChange(['contributionRooms', account.type, accountOwner], val);
+                                              handleNestedAssumptionChange(['contributionRooms', account.type, ownerKey], val);
                                             }
                                           }}
                                           currentBalance={account.balance}
@@ -1388,8 +1485,30 @@ export const Projections = () => {
                             )}
                           </div>
                         );
-                      })
-                    )}
+                      })}
+                          </div>
+                        );
+                      };
+                      
+                      // Render groups in order: person1, person2, then other owners, then joint
+                      const sortedOwnerNames = Object.keys(ownerGroups).sort((a, b) => {
+                        // Prioritize person1 and person2 names
+                        if (a === person1Name) return -1;
+                        if (b === person1Name) return 1;
+                        if (a === person2Name) return -1;
+                        if (b === person2Name) return 1;
+                        return a.localeCompare(b);
+                      });
+                      
+                      return (
+                        <>
+                          {sortedOwnerNames.map(ownerName => 
+                            renderAccountGroup(ownerName, ownerGroups[ownerName], true)
+                          )}
+                          {jointAccounts.length > 0 && renderAccountGroup('Joint / Household', jointAccounts, false)}
+                        </>
+                      );
+                    })()}
                   </div>
                 </ProjectionInputSection>
 
@@ -1409,7 +1528,7 @@ export const Projections = () => {
                 <div>
                           <div className="flex items-center justify-between mb-2">
                             <label className="block text-sm font-medium text-gray-700">
-                              Annual Income (CAD)
+                              Annual Income ({getPerson1Name()})
                             </label>
                             {getNestedAssumption(['income', 'person1', 'annualIncome']) !== undefined && (
                               <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
@@ -1460,7 +1579,7 @@ export const Projections = () => {
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <label className="block text-sm font-medium text-gray-700">
-                              Annual Expenses (CAD)
+                              Annual Expenses ({getPerson1Name()})
                             </label>
                             {getNestedAssumption(['income', 'person1', 'annualExpenses']) !== undefined && (
                               <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
@@ -1530,33 +1649,65 @@ export const Projections = () => {
                       hasPerson2 ? (
                         <div className="space-y-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Annual Income (CAD)
-                            </label>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Annual Income ({getPerson2Name()})
+                              </label>
+                              {getNestedAssumption(['income', 'person2', 'annualIncome']) !== undefined && (
+                                <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
+                                  Manual Override
+                                </span>
+                              )}
+                              {getNestedAssumption(['income', 'person2', 'annualIncome']) === undefined && (
+                                <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-blue-100 text-blue-800">
+                                  Auto-calculated
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="number"
                               min="0"
                               step="1000"
                               value={getNestedAssumption(['income', 'person2', 'annualIncome']) || ''}
                               onChange={(e) => handleNestedAssumptionChange(['income', 'person2', 'annualIncome'], e.target.value ? parseFloat(e.target.value) : undefined)}
-                              placeholder="Enter annual income"
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Enter annual income to override"
+                              className={`w-full px-4 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                getNestedAssumption(['income', 'person2', 'annualIncome']) !== undefined 
+                                  ? 'border-orange-300 bg-orange-50' 
+                                  : 'border-gray-300'
+                              }`}
                             />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Annual Expenses (CAD)
-                            </label>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Annual Expenses ({getPerson2Name()})
+                              </label>
+                              {getNestedAssumption(['income', 'person2', 'annualExpenses']) !== undefined && (
+                                <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
+                                  Manual Override
+                                </span>
+                              )}
+                              {getNestedAssumption(['income', 'person2', 'annualExpenses']) === undefined && (
+                                <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-blue-100 text-blue-800">
+                                  Auto-calculated
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="number"
                               min="0"
                               step="1000"
                               value={getNestedAssumption(['income', 'person2', 'annualExpenses']) || ''}
                               onChange={(e) => handleNestedAssumptionChange(['income', 'person2', 'annualExpenses'], e.target.value ? parseFloat(e.target.value) : undefined)}
-                              placeholder="Enter annual expenses"
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Enter annual expenses to override"
+                              className={`w-full px-4 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                getNestedAssumption(['income', 'person2', 'annualExpenses']) !== undefined 
+                                  ? 'border-orange-300 bg-orange-50' 
+                                  : 'border-gray-300'
+                              }`}
                             />
-                        </div>
+                          </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                               Salary Growth Rate: {((getNestedAssumption(['income', 'person2', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate) * 100).toFixed(1)}%

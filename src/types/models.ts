@@ -1,21 +1,12 @@
 // Core data models for Grouse personal finance app
 
-export type PersonProfile = {
-  nickname?: string; // Display name (e.g., "John", "Sarah")
-  age?: number; // Current age
-  annualIncome?: number; // Annual income in CAD
-};
-
 export type Household = {
   id: string;
   name: string;
   province?: 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'NT' | 'NU' | 'ON' | 'PE' | 'QC' | 'SK' | 'YT'; // Canadian province/territory
-  owners?: string[]; // List of owners/people (e.g., ["Person 1", "Person 2", "Joint"])
+  owners?: string[]; // List of owners/people (e.g., ["Ranbir", "Sarah", "Joint", "Household"])
   financialIndependenceYears?: number; // Target years of expenses for financial independence
-  personProfiles?: {
-    person1?: PersonProfile;
-    person2?: PersonProfile;
-  };
+  // Note: personProfiles removed - use owners array and account.owner field instead
 };
 
 export type Holding = {
@@ -159,12 +150,18 @@ export type ProjectionAssumptions = {
   inflationRate: number; // e.g., 0.02 (2% annual)
   salaryGrowthRate: number; // e.g., 0.03 (3% annual)
   
-  // Income & Employment (per person)
+  // Income & Employment (per owner - uses owner names as keys)
   income?: {
-    person1?: {
+    [ownerName: string]: {
       annualIncome?: number; // Annual income in CAD
       annualExpenses?: number; // Annual expenses in CAD
       salaryGrowthRate?: number; // Per-person salary growth rate (overrides global if set)
+    };
+    // Legacy support: person1/person2 keys still work but are deprecated
+    person1?: {
+      annualIncome?: number;
+      annualExpenses?: number;
+      salaryGrowthRate?: number;
     };
     person2?: {
       annualIncome?: number;
@@ -184,13 +181,20 @@ export type ProjectionAssumptions = {
   retirementExpenseRatio?: number; // e.g., 0.70 (70% of current expenses)
   withdrawalRate?: number; // e.g., 0.04 (4% rule)
   
-  // Government Benefits (CPP/QPP & OAS)
+  // Government Benefits (CPP/QPP & OAS) - uses owner names as keys
   cpp?: {
-    person1?: {
+    [ownerName: string]: {
       yearsOfContributions?: number;
       averageContributions?: number; // Average YMPE contribution
       expectedBenefit?: number; // Monthly benefit at 65
       startAge?: number; // When to start taking CPP (60-70)
+    };
+    // Legacy support: person1/person2 keys still work but are deprecated
+    person1?: {
+      yearsOfContributions?: number;
+      averageContributions?: number;
+      expectedBenefit?: number;
+      startAge?: number;
     };
     person2?: {
       yearsOfContributions?: number;
@@ -200,11 +204,18 @@ export type ProjectionAssumptions = {
     };
   };
   oas?: {
-    person1?: {
+    [ownerName: string]: {
       yearsInCanada?: number; // For partial OAS
       expectedBenefit?: number; // Monthly benefit
       startAge?: number; // When to start (65-70)
       clawbackThreshold?: number; // Income threshold for clawback
+    };
+    // Legacy support: person1/person2 keys still work but are deprecated
+    person1?: {
+      yearsInCanada?: number;
+      expectedBenefit?: number;
+      startAge?: number;
+      clawbackThreshold?: number;
     };
     person2?: {
       yearsInCanada?: number;
@@ -214,13 +225,17 @@ export type ProjectionAssumptions = {
     };
   };
   
-  // Account Contribution Rooms (Manual Entry)
+  // Account Contribution Rooms (Manual Entry) - uses owner names as keys
   contributionRooms?: {
     rrsp?: {
+      [ownerName: string]: number;
+      // Legacy support: person1/person2 keys still work but are deprecated
       person1?: number;
       person2?: number;
     };
     tfsa?: {
+      [ownerName: string]: number;
+      // Legacy support: person1/person2 keys still work but are deprecated
       person1?: number;
       person2?: number;
     };
