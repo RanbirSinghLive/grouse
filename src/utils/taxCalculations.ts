@@ -31,14 +31,17 @@ export function getHoldingReturnRates(
   account: Account,
   assumptions: ProjectionAssumptions
 ): { growthRate: number; dividendYield: number; dividendType: Holding['dividendType'] } {
-  // Skip holding-specific rates - use account or scenario defaults only
-  // This removes the influence of holding/account overrides section
+  // Check for scenario override first, then account defaults, then scenario defaults
+  // This allows scenario-specific overrides without modifying base account data
+  const accountOverride = assumptions.accountOverrides?.[account.id];
   const growthRate =
+    accountOverride?.investmentGrowthRate ??
     account.investmentGrowthRate ??
     assumptions.investmentGrowthRate ??
     (assumptions.investmentReturnRate * 0.7); // Default: 70% growth, 30% dividends
 
   const dividendYield =
+    accountOverride?.investmentDividendYield ??
     account.investmentDividendYield ??
     assumptions.investmentDividendYield ??
     (assumptions.investmentReturnRate * 0.3); // Default: 30% dividends

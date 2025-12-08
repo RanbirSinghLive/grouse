@@ -1,38 +1,37 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { projectNetWorth, createDefaultScenario } from '../utils/projections';
 import type { ProjectionScenario, ProjectionResult } from '../types/models';
 import { NetWorthProjectionChart } from '../components/NetWorthProjectionChart';
 import { getAllProvinces, getProvinceName } from '../utils/canadianTaxRates';
-import { calcMonthlyIncomeFromTransactions, calcMonthlyExpensesFromTransactions } from '../utils/calculations';
+import { calcMonthlyIncomeFromTransactions, calcMonthlyExpensesFromTransactions, formatAccountType } from '../utils/calculations';
 import { ProjectionInputSection } from '../components/ProjectionInputSection';
 import { PersonInputGroup } from '../components/PersonInputGroup';
 import { ContributionRoomInput } from '../components/ContributionRoomInput';
-import { calculateCPPBenefit, calculateOASBenefit, estimateCPPContributionRate } from '../utils/governmentBenefits';
+import { calculateCPPBenefit } from '../utils/governmentBenefits';
+import { GrowthDriversAnalysis } from '../components/GrowthDriversAnalysis';
+import type { Account } from '../types/models';
 
 export const Projections = () => {
   const {
     household,
-    setHousehold,
     accounts,
     transactions,
     projectionScenarios,
     addProjectionScenario,
     updateProjectionScenario,
     deleteProjectionScenario,
+    updateAccount,
   } = useHouseholdStore();
 
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
-  // Person profile state
-  const [person1Nickname, setPerson1Nickname] = useState(household?.personProfiles?.person1?.nickname || '');
-  const [person1Age, setPerson1Age] = useState(household?.personProfiles?.person1?.age || undefined);
-  const [person2Nickname, setPerson2Nickname] = useState(household?.personProfiles?.person2?.nickname || '');
-  const [person2Age, setPerson2Age] = useState(household?.personProfiles?.person2?.age || undefined);
   // Chart collapse state
   const [chartExpanded, setChartExpanded] = useState(true);
   // Panel visibility state
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
+  // Expanded accounts state for unified Accounts section
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
 
   // Get or create default scenario
   const currentScenario = useMemo(() => {
@@ -88,41 +87,6 @@ export const Projections = () => {
     return expensesExcludingMortgage;
   }, [transactions, accounts]);
 
-  // Auto-populate account balances for contribution rooms
-  const accountBalances = useMemo(() => {
-    const balances: {
-      rrsp: { person1: number; person2: number };
-      tfsa: { person1: number; person2: number };
-      resp: number;
-    } = {
-      rrsp: { person1: 0, person2: 0 },
-      tfsa: { person1: 0, person2: 0 },
-      resp: 0,
-    };
-
-    accounts.forEach(acc => {
-      if (acc.type === 'rrsp') {
-        const owner = acc.owner || 'person1';
-        if (owner.toLowerCase().includes('1') || owner.toLowerCase() === 'person 1') {
-          balances.rrsp.person1 += acc.balance;
-        } else {
-          balances.rrsp.person2 += acc.balance;
-        }
-      } else if (acc.type === 'tfsa') {
-        const owner = acc.owner || 'person1';
-        if (owner.toLowerCase().includes('1') || owner.toLowerCase() === 'person 1') {
-          balances.tfsa.person1 += acc.balance;
-        } else {
-          balances.tfsa.person2 += acc.balance;
-        }
-      } else if (acc.type === 'resp') {
-        balances.resp += acc.balance;
-      }
-    });
-
-    return balances;
-  }, [accounts]);
-
   // Check if RESP accounts exist
   const hasRESPAccounts = useMemo(() => {
     return accounts.some(acc => acc.type === 'resp');
@@ -142,25 +106,39 @@ export const Projections = () => {
     setSelectedScenarioId(defaultScenario.id);
   };
 
-  // Update person profiles when household changes
-  useEffect(() => {
-    console.log('[Projections] Updating person profile state from household');
-    setPerson1Nickname(household?.personProfiles?.person1?.nickname || '');
-    setPerson1Age(household?.personProfiles?.person1?.age);
-    setPerson2Nickname(household?.personProfiles?.person2?.nickname || '');
-    setPerson2Age(household?.personProfiles?.person2?.age);
-  }, [household]);
 
   // Check if Person 2 exists
   const hasPerson2 = !!household?.personProfiles?.person2;
 
   // Helper functions to get display names (nickname if available, otherwise "Person 1"/"Person 2")
   const getPerson1Name = () => {
-    return person1Nickname.trim() || 'Person 1';
+    return household?.personProfiles?.person1?.nickname?.trim() || 'Person 1';
   };
 
   const getPerson2Name = () => {
-    return person2Nickname.trim() || 'Person 2';
+    return household?.personProfiles?.person2?.nickname?.trim() || 'Person 2';
+  };
+  
+  // Helper to determine if account belongs to person 1 or person 2
+  const getAccountOwnerPerson = (account: Account): 'person1' | 'person2' | 'joint' => {
+    if (!account.owner) return 'person1';
+    const owner = account.owner.toLowerCase();
+    if (owner.includes('1') || owner === 'person 1') return 'person1';
+    if (owner.includes('2') || owner === 'person 2') return 'person2';
+    return 'joint';
+  };
+  
+  // Toggle account expansion
+  const toggleAccountExpansion = (accountId: string) => {
+    setExpandedAccounts(prev => {
+      const next = new Set(prev);
+      if (next.has(accountId)) {
+        next.delete(accountId);
+      } else {
+        next.add(accountId);
+      }
+      return next;
+    });
   };
 
   // Scroll to section handler for milestone clicks
@@ -175,66 +153,6 @@ export const Projections = () => {
     }
   };
 
-  const handleSavePersonProfiles = () => {
-    if (!household) return;
-    console.log('[Projections] Saving person profiles');
-    const personProfiles: { person1?: any; person2?: any } = {
-      person1: {
-        nickname: person1Nickname || undefined,
-        age: person1Age || undefined,
-        // Preserve existing annualIncome if it exists
-        ...(household.personProfiles?.person1?.annualIncome !== undefined && {
-          annualIncome: household.personProfiles.person1.annualIncome
-        }),
-      },
-    };
-    
-    // Only include person2 if they have data or already exist
-    if (hasPerson2 || person2Nickname || person2Age) {
-      personProfiles.person2 = {
-        nickname: person2Nickname || undefined,
-        age: person2Age || undefined,
-        // Preserve existing annualIncome if it exists
-        ...(household.personProfiles?.person2?.annualIncome !== undefined && {
-          annualIncome: household.personProfiles.person2.annualIncome
-        }),
-      };
-    }
-    
-    setHousehold({
-      ...household,
-      personProfiles,
-    });
-    console.log('[Projections] Person profiles saved, annualIncome preserved');
-    alert('Person profiles saved!');
-  };
-
-  const handleAddPerson2 = () => {
-    if (!household) return;
-    console.log('[Projections] Adding Person 2');
-    setHousehold({
-      ...household,
-      personProfiles: {
-        ...household.personProfiles,
-        person2: {
-          nickname: '',
-          age: undefined,
-        },
-      },
-    });
-  };
-
-  const handleRemovePerson2 = () => {
-    if (!household) return;
-    if (!window.confirm(`Are you sure you want to remove ${getPerson2Name()}?`)) return;
-    console.log('[Projections] Removing Person 2');
-    const personProfiles = { ...household.personProfiles };
-    delete personProfiles.person2;
-    setHousehold({
-      ...household,
-      personProfiles: Object.keys(personProfiles).length > 0 ? personProfiles : undefined,
-    });
-  };
 
   const handleDeleteScenario = (id: string) => {
     if (window.confirm('Are you sure you want to delete this scenario?')) {
@@ -388,6 +306,167 @@ export const Projections = () => {
               {leftPanelVisible && (
                 <div className="flex-1 overflow-y-auto p-4 pt-14">
 
+                  {/* Data Sources Indicator */}
+                  {currentScenario && (
+                    <div className="mb-6 bg-white rounded-lg p-4 border-2 border-blue-200 shadow-sm">
+                      <h2 className="text-lg font-bold text-gray-900 mb-3">📊 Data Sources</h2>
+                      
+                      {/* Accounts Used */}
+                      <div className="mb-4">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-2">Accounts Used</h3>
+                        <div className="space-y-1 text-xs">
+                          {(() => {
+                            const investmentAccounts = accounts.filter(a => 
+                              a.kind === 'asset' && ['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered'].includes(a.type)
+                            );
+                            const realEstateAccounts = accounts.filter(a => 
+                              a.kind === 'asset' && ['primary_home', 'rental_property'].includes(a.type)
+                            );
+                            const debtAccounts = accounts.filter(a => 
+                              a.kind === 'liability' && ['mortgage', 'loan', 'credit_card'].includes(a.type)
+                            );
+                            const cashAccounts = accounts.filter(a => 
+                              a.kind === 'asset' && ['cash', 'chequing'].includes(a.type)
+                            );
+                            
+                            return (
+                              <>
+                                {investmentAccounts.length > 0 && (
+                                  <div className="text-gray-600">
+                                    💼 {investmentAccounts.length} investment account{investmentAccounts.length !== 1 ? 's' : ''}
+                                  </div>
+                                )}
+                                {realEstateAccounts.length > 0 && (
+                                  <div className="text-gray-600">
+                                    🏠 {realEstateAccounts.length} real estate account{realEstateAccounts.length !== 1 ? 's' : ''}
+                                  </div>
+                                )}
+                                {debtAccounts.length > 0 && (
+                                  <div className="text-gray-600">
+                                    💳 {debtAccounts.length} debt account{debtAccounts.length !== 1 ? 's' : ''}
+                                  </div>
+                                )}
+                                {cashAccounts.length > 0 && (
+                                  <div className="text-gray-600">
+                                    💵 {cashAccounts.length} cash account{cashAccounts.length !== 1 ? 's' : ''}
+                                  </div>
+                                )}
+                                {accounts.length === 0 && (
+                                  <div className="text-gray-500 italic">No accounts configured</div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                        <button
+                          onClick={() => {
+                            // Navigate to Accounts tab - this would need routing or tab switching
+                            console.log('[Projections] Navigate to Accounts tab');
+                            // For now, just log - would need App.tsx routing to implement
+                          }}
+                          className="mt-2 text-xs text-blue-600 hover:text-blue-800 underline"
+                        >
+                          View/Edit in Accounts →
+                        </button>
+                      </div>
+                      
+                      {/* Income Source */}
+                      <div className="mb-4 pb-4 border-b border-gray-200">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-2">Income Source</h3>
+                        {(() => {
+                          const person1Income = getNestedAssumption(['income', 'person1', 'annualIncome']);
+                          const person2Income = getNestedAssumption(['income', 'person2', 'annualIncome']);
+                          const hasManualIncome = person1Income !== undefined || person2Income !== undefined;
+                          
+                          if (hasManualIncome) {
+                            return (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
+                                    Manual Override
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  {person1Income && `Person 1: $${(person1Income).toLocaleString('en-CA')}/year`}
+                                  {person1Income && person2Income && ', '}
+                                  {person2Income && `Person 2: $${(person2Income).toLocaleString('en-CA')}/year`}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Transaction avg: ${(autoCalculatedTaxableIncome).toLocaleString('en-CA')}/year
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-blue-100 text-blue-800">
+                                    Auto-calculated
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  From transactions: ${(autoCalculatedTaxableIncome).toLocaleString('en-CA')}/year
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Edit in Income & Employment section to override
+                                </div>
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+                      
+                      {/* Expense Source */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-2">Expense Source</h3>
+                        {(() => {
+                          const person1Expenses = getNestedAssumption(['income', 'person1', 'annualExpenses']);
+                          const person2Expenses = getNestedAssumption(['income', 'person2', 'annualExpenses']);
+                          const hasManualExpenses = person1Expenses !== undefined || person2Expenses !== undefined;
+                          
+                          if (hasManualExpenses) {
+                            return (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
+                                    Manual Override
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  {person1Expenses && `Person 1: $${(person1Expenses).toLocaleString('en-CA')}/year`}
+                                  {person1Expenses && person2Expenses && ', '}
+                                  {person2Expenses && `Person 2: $${(person2Expenses).toLocaleString('en-CA')}/year`}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Transaction avg: ${(autoCalculatedMonthlyExpenses * 12).toLocaleString('en-CA')}/year (excl. mortgage)
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-blue-100 text-blue-800">
+                                    Auto-calculated
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  From transactions: ${(autoCalculatedMonthlyExpenses * 12).toLocaleString('en-CA')}/year
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  (excluding mortgage payments)
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Edit in Income & Employment section to override
+                                </div>
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Scenario Selector */}
                   <div className="mb-6">
                     <h2 className="text-xl font-bold text-gray-900 mb-4">Scenario</h2>
@@ -515,6 +594,235 @@ export const Projections = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Retirement Planning */}
+                  {currentScenario && (
+                    <div className="mb-6">
+                      <h2 className="text-xl font-bold text-gray-900 mb-4">Retirement Planning</h2>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Target Retirement Age ({getPerson1Name()})
+                            </label>
+                            <input
+                              type="number"
+                              min="50"
+                              max="75"
+                              value={currentScenario.assumptions.retirement?.targetRetirementAge || currentScenario.assumptions.targetRetirementAge || 65}
+                              onChange={(e) => {
+                                const age = e.target.value ? parseInt(e.target.value) : undefined;
+                                if (age) {
+                                  handleNestedAssumptionChange(['retirement', 'targetRetirementAge'], age);
+                                  handleAssumptionChange('targetRetirementAge', age);
+                                }
+                              }}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          {hasPerson2 && (
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Target Retirement Age ({getPerson2Name()})
+                              </label>
+                              <input
+                                type="number"
+                                min="50"
+                                max="75"
+                                value={currentScenario.assumptions.retirement?.targetRetirementAge2 || ''}
+                                onChange={(e) => {
+                                  const age = e.target.value ? parseInt(e.target.value) : undefined;
+                                  handleNestedAssumptionChange(['retirement', 'targetRetirementAge2'], age);
+                                }}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Retirement Expense Ratio: {((currentScenario.assumptions.retirement?.retirementExpenseRatio || currentScenario.assumptions.retirementExpenseRatio || 0.70) * 100).toFixed(0)}%
+                            </label>
+                            <input
+                              type="range"
+                              min="0.60"
+                              max="1.00"
+                              step="0.01"
+                              value={currentScenario.assumptions.retirement?.retirementExpenseRatio || currentScenario.assumptions.retirementExpenseRatio || 0.70}
+                              onChange={(e) => {
+                                const ratio = parseFloat(e.target.value);
+                                handleNestedAssumptionChange(['retirement', 'retirementExpenseRatio'], ratio);
+                                handleAssumptionChange('retirementExpenseRatio', ratio);
+                              }}
+                              className="w-full"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Percentage of current expenses needed in retirement</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Withdrawal Rate: {((currentScenario.assumptions.retirement?.withdrawalRate || currentScenario.assumptions.withdrawalRate || 0.04) * 100).toFixed(1)}%
+                            </label>
+                            <input
+                              type="range"
+                              min="0.02"
+                              max="0.06"
+                              step="0.001"
+                              value={currentScenario.assumptions.retirement?.withdrawalRate || currentScenario.assumptions.withdrawalRate || 0.04}
+                              onChange={(e) => {
+                                const rate = parseFloat(e.target.value);
+                                handleNestedAssumptionChange(['retirement', 'withdrawalRate'], rate);
+                                handleAssumptionChange('withdrawalRate', rate);
+                              }}
+                              className="w-full"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">4% rule is standard</p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Withdrawal Strategy
+                          </label>
+                          <select
+                            value={currentScenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized'}
+                            onChange={(e) => handleNestedAssumptionChange(['retirement', 'withdrawalStrategy'], e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="rrsp_first">RRSP First</option>
+                            <option value="tfsa_first">TFSA First</option>
+                            <option value="balanced">Balanced</option>
+                            <option value="tax_optimized">Tax-Optimized (Smart Sequencing)</option>
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">Order of account withdrawals in retirement</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Annual Healthcare Costs ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="100"
+                              value={currentScenario.assumptions.retirement?.healthcareCosts || ''}
+                              onChange={(e) => {
+                                const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                handleNestedAssumptionChange(['retirement', 'healthcareCosts'], val);
+                              }}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="e.g., 5000"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Annual Long-Term Care Costs ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1000"
+                              value={currentScenario.assumptions.retirement?.longTermCareCosts || ''}
+                              onChange={(e) => {
+                                const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                handleNestedAssumptionChange(['retirement', 'longTermCareCosts'], val);
+                              }}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Optional"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={currentScenario.assumptions.retirement?.oasClawbackPlanning || false}
+                              onChange={(e) => handleNestedAssumptionChange(['retirement', 'oasClawbackPlanning'], e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                            <span className="text-sm text-gray-700">Plan withdrawals to minimize OAS clawback</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={currentScenario.assumptions.retirement?.taxOptimizedSequence || false}
+                              onChange={(e) => handleNestedAssumptionChange(['retirement', 'taxOptimizedSequence'], e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                            <span className="text-sm text-gray-700">Optimize withdrawal order for taxes</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tax Strategy */}
+                  {currentScenario && (
+                    <div className="mb-6">
+                      <h2 className="text-xl font-bold text-gray-900 mb-4">Tax Strategy</h2>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Province (for tax calculations)
+                            </label>
+                            <select
+                              value={currentScenario.assumptions.province || household?.province || ''}
+                              onChange={(e) => handleAssumptionChange('province', e.target.value || undefined)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">Use household province</option>
+                              {getAllProvinces().map(province => (
+                                <option key={province} value={province}>
+                                  {getProvinceName(province)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Annual Taxable Income ($)
+                            </label>
+                            <input
+                              type="number"
+                              value={currentScenario.assumptions.taxableIncome || ''}
+                              onChange={(e) => handleAssumptionChange('taxableIncome', e.target.value ? parseFloat(e.target.value) : undefined)}
+                              placeholder="Auto-calculated from income"
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                              Used to calculate marginal tax rate
+                              {autoCalculatedTaxableIncome > 0 && (
+                                <span className="block mt-1 text-gray-600 font-mono">
+                                  Auto-calculated: ${autoCalculatedTaxableIncome.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                  <button
+                                    onClick={() => handleAssumptionChange('taxableIncome', autoCalculatedTaxableIncome)}
+                                    className="ml-2 text-blue-600 hover:text-blue-800 text-xs underline"
+                                  >
+                                    Use this
+                                  </button>
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Marginal Tax Rate: {((currentScenario.assumptions.marginalTaxRate ?? 0) * 100).toFixed(1)}%
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.50"
+                            step="0.01"
+                            value={currentScenario.assumptions.marginalTaxRate ?? 0.30}
+                            onChange={(e) => handleAssumptionChange('marginalTaxRate', parseFloat(e.target.value))}
+                            className="w-full"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Auto-calculated if province & income set</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -587,6 +895,15 @@ export const Projections = () => {
                           </p>
                         </div>
                       )}
+
+                      {/* Growth Drivers Analysis */}
+                      <div className="mt-6">
+                        <GrowthDriversAnalysis 
+                          result={projectionResult}
+                          startingNetWorth={projectionResult.summary.startingNetWorth}
+                          accounts={accounts}
+                        />
+                      </div>
 
                       {/* Annual Summary Table by Account */}
                       <div className="mt-6">
@@ -778,110 +1095,303 @@ export const Projections = () => {
 
                   {currentScenario && (
                     <div className="space-y-4">
-                {/* Person Profiles */}
-                {household && (
-                  <ProjectionInputSection
-                    id="person-profiles"
-                    title="Person Profiles"
-                    defaultExpanded={true}
-                    helpText="Demographic and income information for each person"
-                  >
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {/* Person 1 */}
-                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <h3 className="text-md font-semibold text-gray-900 mb-4">{getPerson1Name()}</h3>
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Nickname
-                            </label>
-                            <input
-                              type="text"
-                              value={person1Nickname}
-                              onChange={(e) => setPerson1Nickname(e.target.value)}
-                              placeholder="e.g., John, Sarah"
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Age
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              max="120"
-                              value={person1Age || ''}
-                              onChange={(e) => setPerson1Age(e.target.value ? parseInt(e.target.value) : undefined)}
-                              placeholder="Enter age"
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                        </div>
+                {/* Accounts - Unified Section */}
+                <ProjectionInputSection
+                  id="accounts"
+                  title="Accounts"
+                  defaultExpanded={true}
+                  helpText="View and configure accounts for this projection scenario. New accounts from Accounts tab will appear here automatically."
+                >
+                  <div className="space-y-2">
+                    {accounts.length === 0 ? (
+                      <div className="text-sm text-gray-500 italic text-center py-4">
+                        No accounts configured. Add accounts in the Accounts tab.
                       </div>
-
-                      {/* Person 2 */}
-                      {hasPerson2 ? (
-                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                          <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-md font-semibold text-gray-900">{getPerson2Name()}</h3>
-                            <button
-                              onClick={handleRemovePerson2}
-                              className="text-red-600 hover:text-red-800 text-sm font-medium"
+                    ) : (
+                      accounts.map((account) => {
+                        const isExpanded = expandedAccounts.has(account.id);
+                        const accountOverride = getNestedAssumption(['accountOverrides', account.id]);
+                        const hasOverride = !!accountOverride;
+                        const accountOwner = getAccountOwnerPerson(account);
+                        
+                        return (
+                          <div key={account.id} className="bg-white rounded-lg border-2 border-gray-200 overflow-hidden">
+                            {/* Account Header Row - Clickable */}
+                            <div
+                              className="flex items-center justify-between p-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                              onClick={() => toggleAccountExpansion(account.id)}
                             >
-                              Remove
-                            </button>
-                          </div>
-                          <div className="space-y-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Nickname
-                              </label>
-                              <input
-                                type="text"
-                                value={person2Nickname}
-                                onChange={(e) => setPerson2Nickname(e.target.value)}
-                                placeholder="e.g., John, Sarah"
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
+                              <div className="flex-1 grid grid-cols-4 gap-4 items-center">
+                                <div className="font-semibold text-sm text-gray-900">{account.name}</div>
+                                <div className="text-sm text-gray-600">{formatAccountType(account.type)}</div>
+                                <div className="text-sm font-semibold text-gray-900">
+                                  ${account.balance.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  {account.owner || 'All / Household'}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {hasOverride && (
+                                  <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
+                                    Override
+                                  </span>
+                                )}
+                                <svg
+                                  className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'transform rotate-180' : ''}`}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </div>
                             </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Age
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                max="120"
-                                value={person2Age || ''}
-                                onChange={(e) => setPerson2Age(e.target.value ? parseInt(e.target.value) : undefined)}
-                                placeholder="Enter age"
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
+                            
+                            {/* Expanded Content */}
+                            {isExpanded && (
+                              <div className="border-t border-gray-200 p-4 bg-gray-50 space-y-4">
+                                {/* Contribution Room Inputs for RRSP/TFSA */}
+                                {(account.type === 'rrsp' || account.type === 'tfsa') && (
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-2">
+                                      Contribution Room ({account.type.toUpperCase()})
+                                    </label>
+                                    {(() => {
+                                      // For RRSP, calculate default as 2026 limit ($33,810) minus DCPP contribution
+                                      const currentValue = getNestedAssumption(['contributionRooms', account.type, accountOwner]);
+                                      const RRSP_2026_LIMIT = 33810;
+                                      const dcppContribution = currentScenario?.assumptions.dcpp?.annualContribution || 0;
+                                      const calculatedDefault = account.type === 'rrsp' ? Math.max(0, RRSP_2026_LIMIT - dcppContribution) : undefined;
+                                      
+                                      // Use calculated default if no value is set
+                                      const displayValue = currentValue ?? calculatedDefault;
+                                      
+                                      // Build help text
+                                      let helpText = `Enter ${account.type.toUpperCase()} contribution room for ${accountOwner === 'person1' ? getPerson1Name() : accountOwner === 'person2' ? getPerson2Name() : 'joint'}`;
+                                      if (account.type === 'rrsp') {
+                                        if (currentValue === undefined && calculatedDefault !== undefined) {
+                                          helpText = `Default: $${calculatedDefault.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (2026 limit $${RRSP_2026_LIMIT.toLocaleString('en-CA')} - DCPP $${dcppContribution.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})`;
+                                        } else if (dcppContribution > 0) {
+                                          helpText += `. 2026 limit: $${RRSP_2026_LIMIT.toLocaleString('en-CA')}, DCPP: $${dcppContribution.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+                                        }
+                                      }
+                                      
+                                      return (
+                                        <ContributionRoomInput
+                                          label=""
+                                          value={displayValue}
+                                          onChange={(val) => {
+                                            // If user clears the field and it was using the default, set to undefined
+                                            // Otherwise, save the value they entered
+                                            if (val === undefined || val === null) {
+                                              handleNestedAssumptionChange(['contributionRooms', account.type, accountOwner], undefined);
+                                            } else {
+                                              handleNestedAssumptionChange(['contributionRooms', account.type, accountOwner], val);
+                                            }
+                                          }}
+                                          currentBalance={account.balance}
+                                          helpText={helpText}
+                                        />
+                                      );
+                                    })()}
+                                  </div>
+                                )}
+                                
+                                {/* RESP Contribution Room */}
+                                {account.type === 'resp' && (
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-2">
+                                      RESP Contribution Room
+                                    </label>
+                                    <ContributionRoomInput
+                                      label=""
+                                      value={getNestedAssumption(['contributionRooms', 'resp', 'total'])}
+                                      onChange={(val) => handleNestedAssumptionChange(['contributionRooms', 'resp', 'total'], val)}
+                                      currentBalance={account.balance}
+                                      helpText="Total RESP contribution room (lifetime limit: $50,000 per beneficiary)"
+                                      maxContribution={50000}
+                                    />
+                                    <div className="mt-2">
+                                      <label className="flex items-center gap-2">
+                                        <input
+                                          type="checkbox"
+                                          checked={getNestedAssumption(['contributionRooms', 'resp', 'cesgEligible']) || false}
+                                          onChange={(e) => handleNestedAssumptionChange(['contributionRooms', 'resp', 'cesgEligible'], e.target.checked)}
+                                          className="rounded border-gray-300"
+                                        />
+                                        <span className="text-xs text-gray-700">CESG Eligible (Canada Education Savings Grant)</span>
+                                      </label>
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {/* DCPP Employer Match and Annual Contribution */}
+                                {account.type === 'dcpp' && (
+                                  <div>
+                                    <h5 className="text-xs font-semibold text-gray-800 mb-2">DCPP Contributions</h5>
+                                    <div className="space-y-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Annual Contribution ($)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="100"
+                                          value={currentScenario?.assumptions.dcpp?.annualContribution || ''}
+                                          onChange={(e) => {
+                                            const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                            handleNestedAssumptionChange(['dcpp', 'annualContribution'], val);
+                                          }}
+                                          placeholder="Enter annual contribution amount"
+                                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          Annual dollar amount you contribute to this DCPP account
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Employer Match Percentage: {((account.employerMatchPercentage ?? 0) * 100).toFixed(0)}%
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="2"
+                                          step="0.01"
+                                          value={account.employerMatchPercentage ?? ''}
+                                          onChange={(e) => {
+                                            const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                            // Update account directly (not scenario override - this is account property)
+                                            updateAccount(account.id, {
+                                              employerMatchPercentage: val,
+                                            });
+                                          }}
+                                          placeholder="e.g., 0.50 for 50% match, 1.0 for 100% match"
+                                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          Company matches this percentage of your annual contributions (e.g., 50% = company adds $0.50 for every $1.00 you contribute)
+                                        </p>
+                                        {account.employerMatchPercentage && account.employerMatchPercentage > 0 && currentScenario?.assumptions.dcpp?.annualContribution && (
+                                          <p className="text-xs text-blue-700 mt-1 font-medium">
+                                            With ${currentScenario.assumptions.dcpp.annualContribution.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} annual contribution and {(account.employerMatchPercentage * 100).toFixed(0)}% match, company adds ${(currentScenario.assumptions.dcpp.annualContribution * account.employerMatchPercentage).toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/year
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                
+                                {/* Debt Account Overrides */}
+                                {['mortgage', 'loan', 'credit_card'].includes(account.type) && (
+                                  <div>
+                                    <h5 className="text-xs font-semibold text-gray-800 mb-2">Scenario Overrides</h5>
+                                    <div className="grid grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Monthly Payment: ${((accountOverride?.monthlyPayment ?? account.monthlyPayment ?? 0)).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="100"
+                                          value={accountOverride?.monthlyPayment ?? ''}
+                                          onChange={(e) => {
+                                            const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                            if (val !== undefined) {
+                                              handleNestedAssumptionChange(['accountOverrides', account.id, 'monthlyPayment'], val);
+                                            } else {
+                                              const newOverrides = { ...(currentScenario?.assumptions.accountOverrides || {}) };
+                                              if (newOverrides[account.id]) {
+                                                delete newOverrides[account.id].monthlyPayment;
+                                                if (Object.keys(newOverrides[account.id]).length === 0) {
+                                                  delete newOverrides[account.id];
+                                                }
+                                              }
+                                              handleAssumptionChange('accountOverrides', Object.keys(newOverrides).length > 0 ? newOverrides : undefined);
+                                            }
+                                          }}
+                                          placeholder={`Default: ${account.monthlyPayment ? `$${account.monthlyPayment.toLocaleString('en-CA')}` : 'Not set'}`}
+                                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Interest Rate: {((accountOverride?.interestRate ?? account.interestRate ?? 0)).toFixed(2)}%
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="20"
+                                          step="0.01"
+                                          value={accountOverride?.interestRate ?? ''}
+                                          onChange={(e) => {
+                                            const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                            if (val !== undefined) {
+                                              handleNestedAssumptionChange(['accountOverrides', account.id, 'interestRate'], val);
+                                            } else {
+                                              const newOverrides = { ...(currentScenario?.assumptions.accountOverrides || {}) };
+                                              if (newOverrides[account.id]) {
+                                                delete newOverrides[account.id].interestRate;
+                                                if (Object.keys(newOverrides[account.id]).length === 0) {
+                                                  delete newOverrides[account.id];
+                                                }
+                                              }
+                                              handleAssumptionChange('accountOverrides', Object.keys(newOverrides).length > 0 ? newOverrides : undefined);
+                                            }
+                                          }}
+                                          placeholder={`Default: ${account.interestRate ? `${account.interestRate.toFixed(2)}%` : 'Not set'}`}
+                                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                      </div>
+                                    </div>
+                                    {hasOverride && (
+                                      <button
+                                        onClick={() => {
+                                          const newOverrides = { ...(currentScenario?.assumptions.accountOverrides || {}) };
+                                          delete newOverrides[account.id];
+                                          handleAssumptionChange('accountOverrides', Object.keys(newOverrides).length > 0 ? newOverrides : undefined);
+                                        }}
+                                        className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
+                                      >
+                                        Reset to Account Default
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {/* Info for other account types */}
+                                {!['tfsa', 'rrsp', 'dcpp', 'resp', 'non_registered', 'mortgage', 'loan', 'credit_card'].includes(account.type) && (
+                                  <div className="text-xs text-gray-500">
+                                    {account.type === 'primary_home' || account.type === 'rental_property' ? 
+                                      'Real estate accounts don\'t compound - balance stays constant' :
+                                      'Cash accounts receive contributions from savings'}
+                                  </div>
+                                )}
+                                
+                                {/* Link to edit in Accounts tab */}
+                                <div className="pt-2 border-t border-gray-200">
+                                  <button
+                                    onClick={() => {
+                                      console.log('[Projections] Navigate to Accounts tab to edit:', account.id);
+                                      // TODO: Implement navigation to Accounts tab
+                                    }}
+                                    className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                  >
+                                    Edit in Accounts tab →
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ) : (
-                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 border-dashed flex items-center justify-center">
-                          <button
-                            onClick={handleAddPerson2}
-                            className="px-6 py-3 bg-blue-100 text-blue-700 rounded-lg font-semibold hover:bg-blue-200 transition-colors"
-                          >
-                            ➕ Add {getPerson2Name()}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <button
-                        onClick={handleSavePersonProfiles}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-all"
-                      >
-                        💾 Save Person Profiles
-                      </button>
-                    </div>
-                  </ProjectionInputSection>
-                )}
+                        );
+                      })
+                    )}
+                  </div>
+                </ProjectionInputSection>
 
                 {/* Income & Employment */}
                 <ProjectionInputSection
@@ -897,41 +1407,108 @@ export const Projections = () => {
                     person1Content={
                       <div className="space-y-4">
                 <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Annual Income (CAD)
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm font-medium text-gray-700">
+                              Annual Income (CAD)
                             </label>
+                            {getNestedAssumption(['income', 'person1', 'annualIncome']) !== undefined && (
+                              <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
+                                Manual Override
+                              </span>
+                            )}
+                            {getNestedAssumption(['income', 'person1', 'annualIncome']) === undefined && (
+                              <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-blue-100 text-blue-800">
+                                Auto-calculated
+                              </span>
+                            )}
+                          </div>
                           <input
                             type="number"
                             min="0"
                             step="1000"
                             value={getNestedAssumption(['income', 'person1', 'annualIncome']) || ''}
                             onChange={(e) => handleNestedAssumptionChange(['income', 'person1', 'annualIncome'], e.target.value ? parseFloat(e.target.value) : undefined)}
-                            placeholder="Enter annual income"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Enter annual income to override"
+                            className={`w-full px-4 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                              getNestedAssumption(['income', 'person1', 'annualIncome']) !== undefined 
+                                ? 'border-orange-300 bg-orange-50' 
+                                : 'border-gray-300'
+                            }`}
                           />
-                          {/* FYI Info - Auto-calculated from transactions */}
-                          <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-xs text-gray-600">
-                            <span className="font-medium">FYI:</span> Auto-calculated from transactions: ${autoCalculatedTaxableIncome.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/year
+                          {/* Suggested value from transactions */}
+                          <div className={`mt-2 px-3 py-2 rounded text-xs ${
+                            getNestedAssumption(['income', 'person1', 'annualIncome']) !== undefined
+                              ? 'bg-orange-50 border border-orange-200 text-orange-800'
+                              : 'bg-blue-50 border border-blue-200 text-gray-600'
+                          }`}>
+                            <span className="font-medium">
+                              {getNestedAssumption(['income', 'person1', 'annualIncome']) !== undefined ? '⚠️ ' : ''}
+                              Suggested from transactions:
+                            </span> ${autoCalculatedTaxableIncome.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/year
+                            {getNestedAssumption(['income', 'person1', 'annualIncome']) !== undefined && (
+                              <div className="mt-1">
+                                <button
+                                  onClick={() => handleNestedAssumptionChange(['income', 'person1', 'annualIncome'], undefined)}
+                                  className="text-orange-700 hover:text-orange-900 underline"
+                                >
+                                  Use transaction-based value instead
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Annual Expenses (CAD)
-                          </label>
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm font-medium text-gray-700">
+                              Annual Expenses (CAD)
+                            </label>
+                            {getNestedAssumption(['income', 'person1', 'annualExpenses']) !== undefined && (
+                              <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-800">
+                                Manual Override
+                              </span>
+                            )}
+                            {getNestedAssumption(['income', 'person1', 'annualExpenses']) === undefined && (
+                              <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-blue-100 text-blue-800">
+                                Auto-calculated
+                              </span>
+                            )}
+                          </div>
                           <input
                             type="number"
                             min="0"
                             step="1000"
                             value={getNestedAssumption(['income', 'person1', 'annualExpenses']) || ''}
                             onChange={(e) => handleNestedAssumptionChange(['income', 'person1', 'annualExpenses'], e.target.value ? parseFloat(e.target.value) : undefined)}
-                            placeholder="Enter annual expenses"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Enter annual expenses to override"
+                            className={`w-full px-4 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                              getNestedAssumption(['income', 'person1', 'annualExpenses']) !== undefined 
+                                ? 'border-orange-300 bg-orange-50' 
+                                : 'border-gray-300'
+                            }`}
                           />
-                          {/* FYI Info - Auto-calculated from transactions (excluding mortgage payments) */}
-                          <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-xs text-gray-600">
-                            <span className="font-medium">FYI:</span> Auto-calculated from transactions (excluding mortgage payments): ${(autoCalculatedMonthlyExpenses * 12).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/year
-                            </div>
+                          {/* Suggested value from transactions */}
+                          <div className={`mt-2 px-3 py-2 rounded text-xs ${
+                            getNestedAssumption(['income', 'person1', 'annualExpenses']) !== undefined
+                              ? 'bg-orange-50 border border-orange-200 text-orange-800'
+                              : 'bg-blue-50 border border-blue-200 text-gray-600'
+                          }`}>
+                            <span className="font-medium">
+                              {getNestedAssumption(['income', 'person1', 'annualExpenses']) !== undefined ? '⚠️ ' : ''}
+                              Suggested from transactions:
+                            </span> ${(autoCalculatedMonthlyExpenses * 12).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/year
+                            <div className="text-gray-500 mt-0.5">(excluding mortgage payments)</div>
+                            {getNestedAssumption(['income', 'person1', 'annualExpenses']) !== undefined && (
+                              <div className="mt-1">
+                                <button
+                                  onClick={() => handleNestedAssumptionChange(['income', 'person1', 'annualExpenses'], undefined)}
+                                  className="text-orange-700 hover:text-orange-900 underline"
+                                >
+                                  Use transaction-based value instead
+                                </button>
+                              </div>
+                            )}
                           </div>
+                        </div>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                             Salary Growth Rate: {((getNestedAssumption(['income', 'person1', 'salaryGrowthRate']) ?? currentScenario.assumptions.salaryGrowthRate) * 100).toFixed(1)}%
@@ -1311,253 +1888,6 @@ export const Projections = () => {
                       </div>
                 </ProjectionInputSection>
 
-                {/* Account Contributions */}
-                <ProjectionInputSection
-                      id="account-contributions"
-                      title="Account Contributions"
-                      defaultExpanded={false}
-                      helpText="RRSP, TFSA, and RESP contribution room tracking"
-                    >
-                      <div className="space-y-6">
-                        <div>
-                          <h4 className="text-md font-semibold text-gray-800 mb-3">RRSP Contribution Rooms</h4>
-                          <PersonInputGroup
-                            person1Label={`${getPerson1Name()} RRSP Room`}
-                            person2Label={`${getPerson2Name()} RRSP Room`}
-                            showPerson2={true}
-                            person1Content={
-                              <ContributionRoomInput
-                                label=""
-                                value={getNestedAssumption(['contributionRooms', 'rrsp', 'person1'])}
-                                onChange={(val) => handleNestedAssumptionChange(['contributionRooms', 'rrsp', 'person1'], val)}
-                                currentBalance={accountBalances.rrsp.person1}
-                                helpText="Enter your current RRSP contribution room"
-                              />
-                            }
-                            person2Content={
-                              <ContributionRoomInput
-                                label=""
-                                value={getNestedAssumption(['contributionRooms', 'rrsp', 'person2'])}
-                                onChange={(val) => handleNestedAssumptionChange(['contributionRooms', 'rrsp', 'person2'], val)}
-                                currentBalance={accountBalances.rrsp.person2}
-                                helpText="Enter your current RRSP contribution room"
-                              />
-                            }
-                          />
-                        </div>
-                        <div>
-                          <h4 className="text-md font-semibold text-gray-800 mb-3">TFSA Contribution Rooms</h4>
-                          <PersonInputGroup
-                            person1Label={`${getPerson1Name()} TFSA Room`}
-                            person2Label={`${getPerson2Name()} TFSA Room`}
-                            showPerson2={true}
-                            person1Content={
-                              <ContributionRoomInput
-                                label=""
-                                value={getNestedAssumption(['contributionRooms', 'tfsa', 'person1'])}
-                                onChange={(val) => handleNestedAssumptionChange(['contributionRooms', 'tfsa', 'person1'], val)}
-                                currentBalance={accountBalances.tfsa.person1}
-                                helpText="Enter your current TFSA contribution room"
-                              />
-                            }
-                            person2Content={
-                              <ContributionRoomInput
-                                label=""
-                                value={getNestedAssumption(['contributionRooms', 'tfsa', 'person2'])}
-                                onChange={(val) => handleNestedAssumptionChange(['contributionRooms', 'tfsa', 'person2'], val)}
-                                currentBalance={accountBalances.tfsa.person2}
-                                helpText="Enter your current TFSA contribution room"
-                              />
-                            }
-                          />
-                        </div>
-                        {hasRESPAccounts && (
-                          <div>
-                            <h4 className="text-md font-semibold text-gray-800 mb-3">RESP Contribution Room</h4>
-                            <ContributionRoomInput
-                              label="Family RESP Contribution Room"
-                              value={getNestedAssumption(['contributionRooms', 'resp', 'total'])}
-                              onChange={(val) => handleNestedAssumptionChange(['contributionRooms', 'resp', 'total'], val)}
-                              currentBalance={accountBalances.resp}
-                              helpText="Total RESP contribution room (lifetime limit: $50,000 per beneficiary)"
-                              maxContribution={50000}
-                            />
-                            <div className="mt-3">
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={getNestedAssumption(['contributionRooms', 'resp', 'cesgEligible']) || false}
-                                  onChange={(e) => handleNestedAssumptionChange(['contributionRooms', 'resp', 'cesgEligible'], e.target.checked)}
-                                  className="rounded border-gray-300"
-                                />
-                                <span className="text-sm text-gray-700">CESG Eligible (Canada Education Savings Grant)</span>
-                              </label>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                </ProjectionInputSection>
-
-                {/* Retirement Planning */}
-                <ProjectionInputSection
-                      id="retirement-planning"
-                      title="Retirement Planning"
-                      defaultExpanded={false}
-                      helpText="Comprehensive retirement planning including withdrawal strategies and healthcare costs"
-                    >
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Target Retirement Age ({getPerson1Name()})
-                            </label>
-                            <input
-                              type="number"
-                              min="50"
-                              max="75"
-                              value={currentScenario.assumptions.retirement?.targetRetirementAge || currentScenario.assumptions.targetRetirementAge || 65}
-                              onChange={(e) => {
-                                const age = e.target.value ? parseInt(e.target.value) : undefined;
-                                if (age) {
-                                  handleNestedAssumptionChange(['retirement', 'targetRetirementAge'], age);
-                                  handleAssumptionChange('targetRetirementAge', age);
-                                }
-                              }}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Target Retirement Age ({getPerson2Name()})
-                            </label>
-                            <input
-                              type="number"
-                              min="50"
-                              max="75"
-                              value={currentScenario.assumptions.retirement?.targetRetirementAge2 || ''}
-                              onChange={(e) => {
-                                const age = e.target.value ? parseInt(e.target.value) : undefined;
-                                handleNestedAssumptionChange(['retirement', 'targetRetirementAge2'], age);
-                              }}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Retirement Expense Ratio: {((currentScenario.assumptions.retirement?.retirementExpenseRatio || currentScenario.assumptions.retirementExpenseRatio || 0.70) * 100).toFixed(0)}%
-                            </label>
-                            <input
-                              type="range"
-                              min="0.60"
-                              max="1.00"
-                              step="0.01"
-                              value={currentScenario.assumptions.retirement?.retirementExpenseRatio || currentScenario.assumptions.retirementExpenseRatio || 0.70}
-                              onChange={(e) => {
-                                const ratio = parseFloat(e.target.value);
-                                handleNestedAssumptionChange(['retirement', 'retirementExpenseRatio'], ratio);
-                                handleAssumptionChange('retirementExpenseRatio', ratio);
-                              }}
-                              className="w-full"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">Percentage of current expenses needed in retirement</p>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Withdrawal Rate: {((currentScenario.assumptions.retirement?.withdrawalRate || currentScenario.assumptions.withdrawalRate || 0.04) * 100).toFixed(1)}%
-                            </label>
-                            <input
-                              type="range"
-                              min="0.02"
-                              max="0.06"
-                              step="0.001"
-                              value={currentScenario.assumptions.retirement?.withdrawalRate || currentScenario.assumptions.withdrawalRate || 0.04}
-                              onChange={(e) => {
-                                const rate = parseFloat(e.target.value);
-                                handleNestedAssumptionChange(['retirement', 'withdrawalRate'], rate);
-                                handleAssumptionChange('withdrawalRate', rate);
-                              }}
-                              className="w-full"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">4% rule is standard</p>
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Withdrawal Strategy
-                          </label>
-                          <select
-                            value={currentScenario.assumptions.retirement?.withdrawalStrategy || 'tax_optimized'}
-                            onChange={(e) => handleNestedAssumptionChange(['retirement', 'withdrawalStrategy'], e.target.value)}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="rrsp_first">RRSP First</option>
-                            <option value="tfsa_first">TFSA First</option>
-                            <option value="balanced">Balanced</option>
-                            <option value="tax_optimized">Tax-Optimized (Smart Sequencing)</option>
-                          </select>
-                          <p className="text-xs text-gray-500 mt-1">Order of account withdrawals in retirement</p>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Annual Healthcare Costs ($)
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="100"
-                              value={currentScenario.assumptions.retirement?.healthcareCosts || ''}
-                              onChange={(e) => {
-                                const val = e.target.value ? parseFloat(e.target.value) : undefined;
-                                handleNestedAssumptionChange(['retirement', 'healthcareCosts'], val);
-                              }}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="e.g., 5000"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Annual Long-Term Care Costs ($)
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1000"
-                              value={currentScenario.assumptions.retirement?.longTermCareCosts || ''}
-                              onChange={(e) => {
-                                const val = e.target.value ? parseFloat(e.target.value) : undefined;
-                                handleNestedAssumptionChange(['retirement', 'longTermCareCosts'], val);
-                              }}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="Optional"
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={currentScenario.assumptions.retirement?.oasClawbackPlanning || false}
-                              onChange={(e) => handleNestedAssumptionChange(['retirement', 'oasClawbackPlanning'], e.target.checked)}
-                              className="rounded border-gray-300"
-                            />
-                            <span className="text-sm text-gray-700">Plan withdrawals to minimize OAS clawback</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={currentScenario.assumptions.retirement?.taxOptimizedSequence || false}
-                              onChange={(e) => handleNestedAssumptionChange(['retirement', 'taxOptimizedSequence'], e.target.checked)}
-                              className="rounded border-gray-300"
-                            />
-                            <span className="text-sm text-gray-700">Optimize withdrawal order for taxes</span>
-                          </label>
-                        </div>
-                      </div>
-                </ProjectionInputSection>
-
                 {/* RESP Planning */}
                 {hasRESPAccounts && (
                   <ProjectionInputSection
@@ -1654,77 +1984,6 @@ export const Projections = () => {
                         </div>
                   </ProjectionInputSection>
                 )}
-
-                {/* Tax Strategy */}
-                <ProjectionInputSection
-                      id="tax-strategy"
-                      title="Tax Strategy"
-                      defaultExpanded={false}
-                      helpText="Tax assumptions and calculations for projections"
-                    >
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Province (for tax calculations)
-                            </label>
-                            <select
-                              value={currentScenario.assumptions.province || household?.province || ''}
-                              onChange={(e) => handleAssumptionChange('province', e.target.value || undefined)}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <option value="">Use household province</option>
-                              {getAllProvinces().map(province => (
-                                <option key={province} value={province}>
-                                  {getProvinceName(province)}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Annual Taxable Income ($)
-                            </label>
-                            <input
-                              type="number"
-                              value={currentScenario.assumptions.taxableIncome || ''}
-                              onChange={(e) => handleAssumptionChange('taxableIncome', e.target.value ? parseFloat(e.target.value) : undefined)}
-                              placeholder="Auto-calculated from income"
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">
-                              Used to calculate marginal tax rate
-                              {autoCalculatedTaxableIncome > 0 && (
-                                <span className="block mt-1 text-gray-600 font-mono">
-                                  Auto-calculated: ${autoCalculatedTaxableIncome.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                  <button
-                                    onClick={() => handleAssumptionChange('taxableIncome', autoCalculatedTaxableIncome)}
-                                    className="ml-2 text-blue-600 hover:text-blue-800 text-xs underline"
-                                  >
-                                    Use this
-                                  </button>
-                                </span>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Marginal Tax Rate: {((currentScenario.assumptions.marginalTaxRate ?? 0) * 100).toFixed(1)}%
-                          </label>
-                          <input
-                            type="range"
-                            min="0"
-                            max="0.50"
-                            step="0.01"
-                            value={currentScenario.assumptions.marginalTaxRate ?? 0.30}
-                            onChange={(e) => handleAssumptionChange('marginalTaxRate', parseFloat(e.target.value))}
-                            className="w-full"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">Auto-calculated if province & income set</p>
-                        </div>
-                      </div>
-                </ProjectionInputSection>
 
                     </div>
                   )}

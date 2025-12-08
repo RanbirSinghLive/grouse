@@ -48,6 +48,8 @@ export type Account = {
   // Investment return rates (optional, overrides scenario defaults, applies to all holdings in account)
   investmentGrowthRate?: number; // Annual capital appreciation rate (e.g., 0.05 = 5%)
   investmentDividendYield?: number; // Annual dividend yield (e.g., 0.03 = 3%)
+  // DCPP-specific fields for projections
+  employerMatchPercentage?: number; // Employer match percentage (e.g., 0.50 = 50% match, 1.0 = 100% match)
   // Mortgage-specific fields for projections
   monthlyPayment?: number; // Monthly payment amount
   termRemainingMonths?: number; // Remaining term in months
@@ -248,6 +250,22 @@ export type ProjectionAssumptions = {
     beneficiaryAge?: number; // Child's current age
     expectedEducationStart?: number; // Year when education starts
     educationCosts?: number; // Annual education costs
+  };
+  
+  // DCPP Specific
+  dcpp?: {
+    annualContribution?: number; // Annual contribution amount (employer match is handled at account level)
+  };
+  
+  // Account-specific overrides for projections (scenario-level)
+  // These override account defaults but don't modify the base account data
+  accountOverrides?: {
+    [accountId: string]: {
+      investmentGrowthRate?: number; // Annual capital appreciation rate (overrides account.investmentGrowthRate)
+      investmentDividendYield?: number; // Annual dividend yield (overrides account.investmentDividendYield)
+      monthlyPayment?: number; // Monthly payment (for mortgages/loans, overrides account.monthlyPayment)
+      interestRate?: number; // Interest rate (for mortgages/loans, overrides account.interestRate)
+    };
   };
 };
 

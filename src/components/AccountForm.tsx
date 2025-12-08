@@ -45,6 +45,7 @@ export const AccountForm = () => {
     useHoldings: false,
     monthlyPayment: 0,
     termRemainingMonths: 0,
+    employerMatchPercentage: 0,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -63,6 +64,7 @@ export const AccountForm = () => {
         useHoldings: editingAccount.useHoldings || false,
         monthlyPayment: editingAccount.monthlyPayment || 0,
         termRemainingMonths: editingAccount.termRemainingMonths || 0,
+        employerMatchPercentage: editingAccount.employerMatchPercentage || 0,
       });
       setErrors({});
     } else {
@@ -78,6 +80,7 @@ export const AccountForm = () => {
         useHoldings: false,
         monthlyPayment: 0,
         termRemainingMonths: 0,
+        employerMatchPercentage: 0,
       });
       setErrors({});
     }
@@ -133,6 +136,7 @@ export const AccountForm = () => {
       useHoldings: isInvestmentAccount(formData.type) ? formData.useHoldings : false,
       monthlyPayment: formData.type === 'mortgage' && formData.monthlyPayment > 0 ? formData.monthlyPayment : undefined,
       termRemainingMonths: formData.type === 'mortgage' && formData.termRemainingMonths > 0 ? formData.termRemainingMonths : undefined,
+      employerMatchPercentage: formData.type === 'dcpp' && formData.employerMatchPercentage > 0 ? formData.employerMatchPercentage : undefined,
     };
 
     if (editingAccountId) {
@@ -153,6 +157,7 @@ export const AccountForm = () => {
       useHoldings: false,
       monthlyPayment: 0,
       termRemainingMonths: 0,
+      employerMatchPercentage: 0,
     });
     setEditingAccount(null);
   };
@@ -170,6 +175,7 @@ export const AccountForm = () => {
       useHoldings: false,
       monthlyPayment: 0,
       termRemainingMonths: 0,
+      employerMatchPercentage: 0,
     });
     setEditingAccount(null);
   };
@@ -389,6 +395,36 @@ export const AccountForm = () => {
                   </p>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* DCPP Employer Match */}
+        {formData.type === 'dcpp' && (
+          <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Employer Matching</h3>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Employer Match Percentage
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="2"
+                step="0.01"
+                value={formData.employerMatchPercentage === 0 ? '' : formData.employerMatchPercentage}
+                onChange={(e) => setFormData({ ...formData, employerMatchPercentage: Number(e.target.value) || 0 })}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white hover:border-gray-400"
+                placeholder="e.g., 0.50 for 50% match"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Company matches this percentage of your annual contributions (e.g., 50% = company adds $0.50 for every $1.00 you contribute)
+              </p>
+              {formData.employerMatchPercentage > 0 && (
+                <p className="text-xs text-purple-700 mt-1 font-medium">
+                  {(formData.employerMatchPercentage * 100).toFixed(0)}% match: For every $1.00 you contribute, company adds ${formData.employerMatchPercentage.toFixed(2)}
+                </p>
+              )}
             </div>
           </div>
         )}

@@ -13,6 +13,12 @@ export const Settings = () => {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [categoryEditValue, setCategoryEditValue] = useState<string>('');
+  
+  // Person profile state
+  const [person1Nickname, setPerson1Nickname] = useState(household?.personProfiles?.person1?.nickname || '');
+  const [person1Age, setPerson1Age] = useState(household?.personProfiles?.person1?.age || undefined);
+  const [person2Nickname, setPerson2Nickname] = useState(household?.personProfiles?.person2?.nickname || '');
+  const [person2Age, setPerson2Age] = useState(household?.personProfiles?.person2?.age || undefined);
 
   // Get all unique categories from transactions, patterns, and cashflows
   const allCategories = useMemo(() => {
@@ -34,7 +40,84 @@ export const Settings = () => {
     setHouseholdName(household?.name || '');
     setHouseholdProvince(household?.province || '');
     setFinancialIndependenceYears(household?.financialIndependenceYears || 25);
+    setPerson1Nickname(household?.personProfiles?.person1?.nickname || '');
+    setPerson1Age(household?.personProfiles?.person1?.age);
+    setPerson2Nickname(household?.personProfiles?.person2?.nickname || '');
+    setPerson2Age(household?.personProfiles?.person2?.age);
   }, [household]);
+  
+  // Helper functions to get display names
+  const getPerson1Name = () => {
+    return person1Nickname.trim() || 'Person 1';
+  };
+
+  const getPerson2Name = () => {
+    return person2Nickname.trim() || 'Person 2';
+  };
+  
+  // Check if Person 2 exists
+  const hasPerson2 = !!household?.personProfiles?.person2;
+  
+  const handleSavePersonProfiles = () => {
+    if (!household) return;
+    console.log('[Settings] Saving person profiles');
+    const personProfiles: { person1?: any; person2?: any } = {
+      person1: {
+        nickname: person1Nickname || undefined,
+        age: person1Age || undefined,
+        // Preserve existing annualIncome if it exists
+        ...(household.personProfiles?.person1?.annualIncome !== undefined && {
+          annualIncome: household.personProfiles.person1.annualIncome
+        }),
+      },
+    };
+    
+    // Only include person2 if they have data or already exist
+    if (hasPerson2 || person2Nickname || person2Age) {
+      personProfiles.person2 = {
+        nickname: person2Nickname || undefined,
+        age: person2Age || undefined,
+        // Preserve existing annualIncome if it exists
+        ...(household.personProfiles?.person2?.annualIncome !== undefined && {
+          annualIncome: household.personProfiles.person2.annualIncome
+        }),
+      };
+    }
+    
+    setHousehold({
+      ...household,
+      personProfiles,
+    });
+    console.log('[Settings] Person profiles saved');
+    alert('Person profiles saved!');
+  };
+
+  const handleAddPerson2 = () => {
+    if (!household) return;
+    console.log('[Settings] Adding Person 2');
+    setHousehold({
+      ...household,
+      personProfiles: {
+        ...household.personProfiles,
+        person2: {
+          nickname: '',
+          age: undefined,
+        },
+      },
+    });
+  };
+
+  const handleRemovePerson2 = () => {
+    if (!household) return;
+    if (!window.confirm(`Are you sure you want to remove ${getPerson2Name()}?`)) return;
+    console.log('[Settings] Removing Person 2');
+    const personProfiles = { ...household.personProfiles };
+    delete personProfiles.person2;
+    setHousehold({
+      ...household,
+      personProfiles: Object.keys(personProfiles).length > 0 ? personProfiles : undefined,
+    });
+  };
 
   const handleStartEditCategory = (category: string) => {
     setEditingCategory(category);
@@ -221,6 +304,111 @@ export const Settings = () => {
             className="mt-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-blue-800 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
           >
             💾 Save Household Info
+          </button>
+        </div>
+      </div>
+
+      {/* Person Profiles */}
+      <div className="bg-gradient-to-br from-white to-purple-50 p-8 rounded-2xl shadow-lg border-2 border-purple-200 mb-6">
+        <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+          <span className="text-2xl">👥</span>
+          Person Profiles
+        </h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Demographic information for each person in your household. These names will be used throughout the app.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Person 1 */}
+          <div className="bg-white p-4 rounded-lg border border-gray-200">
+            <h3 className="text-md font-semibold text-gray-900 mb-4">{getPerson1Name()}</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nickname
+                </label>
+                <input
+                  type="text"
+                  value={person1Nickname}
+                  onChange={(e) => setPerson1Nickname(e.target.value)}
+                  placeholder="e.g., John, Sarah"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Age
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="120"
+                  value={person1Age || ''}
+                  onChange={(e) => setPerson1Age(e.target.value ? parseInt(e.target.value) : undefined)}
+                  placeholder="Enter age"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Person 2 */}
+          {hasPerson2 ? (
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-md font-semibold text-gray-900">{getPerson2Name()}</h3>
+                <button
+                  onClick={handleRemovePerson2}
+                  className="text-red-600 hover:text-red-800 text-sm font-medium"
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Nickname
+                  </label>
+                  <input
+                    type="text"
+                    value={person2Nickname}
+                    onChange={(e) => setPerson2Nickname(e.target.value)}
+                    placeholder="e.g., John, Sarah"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Age
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    value={person2Age || ''}
+                    onChange={(e) => setPerson2Age(e.target.value ? parseInt(e.target.value) : undefined)}
+                    placeholder="Enter age"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white p-4 rounded-lg border border-gray-200 border-dashed flex items-center justify-center">
+              <button
+                onClick={handleAddPerson2}
+                className="px-6 py-3 bg-purple-100 text-purple-700 rounded-lg font-semibold hover:bg-purple-200 transition-colors"
+              >
+                ➕ Add {getPerson2Name()}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <button
+            onClick={handleSavePersonProfiles}
+            className="px-6 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg font-semibold hover:from-purple-700 hover:to-purple-800 transition-all"
+          >
+            💾 Save Person Profiles
           </button>
         </div>
       </div>
