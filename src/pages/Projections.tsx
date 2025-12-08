@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useHouseholdStore } from '../store/useHouseholdStore';
 import { calcNetWorth, formatAccountType } from '../utils/calculations';
 import { NetWorthProjectionChart } from '../components/NetWorthProjectionChart';
+import { loadProjectionInputs, saveProjectionInputs, loadRetirementYears, saveRetirementYears, type ProjectionInputs, type RetirementYears } from '../utils/storage';
 import type { Account } from '../types/models';
 
 export const Projections = () => {
@@ -17,18 +18,35 @@ export const Projections = () => {
   // End of plan year
   const currentYear = new Date().getFullYear();
   const [endOfPlanYear, setEndOfPlanYear] = useState(currentYear + 30);
+  
+  // Inflation rate (as decimal, e.g., 0.02 for 2%)
+  const [inflationRate, setInflationRate] = useState(0.02);
+
+  // Retirement years by owner
+  const [retirementYears, setRetirementYears] = useState<RetirementYears>(() => {
+    const saved = loadRetirementYears();
+    return saved || {};
+  });
+
+  // Save retirement years to localStorage whenever they change
+  useEffect(() => {
+    saveRetirementYears(retirementYears);
+  }, [retirementYears]);
 
   // Expanded accounts state
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
 
   // Projection model: account-specific inputs
-  const [projectionInputs, setProjectionInputs] = useState<{
-    [accountId: string]: {
-      annualContribution?: number;
-      annualInvestmentGrowth?: number; // As decimal (e.g., 0.06 for 6%)
-      [key: string]: any; // For future custom modifiers
-    };
-  }>({});
+  const [projectionInputs, setProjectionInputs] = useState<ProjectionInputs>(() => {
+    // Load from localStorage on initial mount
+    const saved = loadProjectionInputs();
+    return saved || {};
+  });
+
+  // Save projection inputs to localStorage whenever they change
+  useEffect(() => {
+    saveProjectionInputs(projectionInputs);
+  }, [projectionInputs]);
 
   // Toggle account expansion
   const toggleAccountExpansion = (accountId: string) => {
@@ -44,7 +62,7 @@ export const Projections = () => {
   };
 
   // Update projection input for an account
-  const updateProjectionInput = (accountId: string, field: string, value: number | undefined) => {
+  const updateProjectionInput = (accountId: string, field: string, value: number | string | undefined) => {
     setProjectionInputs(prev => ({
       ...prev,
       [accountId]: {
@@ -52,6 +70,25 @@ export const Projections = () => {
         [field]: value,
       },
     }));
+  };
+
+  // Generate list of years for contribute-until dropdown (per account)
+  const getContributeUntilYearOptions = (account: Account) => {
+    const years: Array<{ value: number | 'retirement'; label: string }> = [];
+    const owner = account.owner || 'All / Joint';
+    const retirementYear = getRetirementYearForOwner(owner);
+    
+    // Add "Retirement" option at the top if owner has retirement year set
+    if (retirementYear) {
+      years.push({ value: 'retirement', label: `Retirement (${retirementYear})` });
+    }
+    
+    // Add all years in projection range
+    for (let year = currentYear; year <= endOfPlanYear; year++) {
+      years.push({ value: year, label: year.toString() });
+    }
+    
+    return years;
   };
 
   // Calculate current net worth
@@ -71,6 +108,35 @@ export const Projections = () => {
     });
     return grouped;
   }, [accounts]);
+
+  // Get all unique owners from accounts
+  const allOwners = useMemo(() => {
+    const owners = new Set<string>();
+    accounts.forEach(account => {
+      if (account.owner) {
+        owners.add(account.owner);
+      }
+    });
+    return Array.from(owners).sort();
+  }, [accounts]);
+
+  // Get retirement year for an owner (returns actual year or null)
+  const getRetirementYearForOwner = (owner: string): number | null => {
+    return retirementYears[owner] || null;
+  };
+
+  // Get contribute until year for an account (resolves 'retirement' to actual year)
+  const getContributeUntilYear = (account: Account): number | null => {
+    const inputs = projectionInputs[account.id];
+    if (!inputs || inputs.contributeUntilYear === undefined) {
+      return null; // Contribute forever
+    }
+    if (inputs.contributeUntilYear === 'retirement') {
+      const owner = account.owner || 'All / Joint';
+      return getRetirementYearForOwner(owner);
+    }
+    return inputs.contributeUntilYear as number;
+  };
 
   if (!household) {
     return (
@@ -95,10 +161,13 @@ export const Projections = () => {
     data.push({
       year: currentYear.toString(),
       netWorth: currentNetWorth,
+      retirementOwner: undefined,
     });
     
     // Project forward year by year
     for (let year = currentYear + 1; year <= endOfPlanYear; year++) {
+      const yearsIntoProjection = year - currentYear;
+      
       // Apply projection model calculations for each account
       accounts.forEach(account => {
         const inputs = projectionInputs[account.id];
@@ -106,8 +175,12 @@ export const Projections = () => {
         
         // Only process asset accounts with inputs
         if (account.kind === 'asset' && inputs) {
-          // Step 1: Add annual contribution (if specified)
-          if (inputs.annualContribution !== undefined && inputs.annualContribution > 0) {
+          // Check if contributions should continue this year
+          const contributeUntilYear = getContributeUntilYear(account);
+          const shouldContribute = contributeUntilYear === null || year <= contributeUntilYear;
+          
+          // Step 1: Add annual contribution (if specified and not past contribute-until year)
+          if (shouldContribute && inputs.annualContribution !== undefined && inputs.annualContribution > 0) {
             balance += inputs.annualContribution;
           }
           
@@ -130,16 +203,41 @@ export const Projections = () => {
         .filter(a => a.kind === 'liability')
         .reduce((sum, a) => sum + (accountBalances[a.id] || a.balance), 0);
       
-      const projectedNetWorth = projectedAssets - projectedLiabilities;
+      const nominalNetWorth = projectedAssets - projectedLiabilities;
+      
+      // Apply inflation adjustment: convert nominal to real (today's purchasing power)
+      // Formula: real = nominal / (1 + inflation)^years
+      const inflationAdjustment = Math.pow(1 + inflationRate, yearsIntoProjection);
+      const realNetWorth = nominalNetWorth / inflationAdjustment;
+      
+      // Check if this year has a retirement milestone
+      const retirementMilestone = Object.entries(retirementYears).find(([_, retYear]) => retYear === year);
       
       data.push({
         year: year.toString(),
-        netWorth: projectedNetWorth,
+        netWorth: realNetWorth,
+        retirementOwner: retirementMilestone ? retirementMilestone[0] : undefined,
       });
     }
     
     return data;
-  }, [currentYear, endOfPlanYear, currentNetWorth, accounts, projectionInputs]);
+  }, [currentYear, endOfPlanYear, currentNetWorth, accounts, projectionInputs, inflationRate, retirementYears]);
+
+  // Collect retirement milestones for chart
+  const retirementMilestones = useMemo(() => {
+    const milestones: Array<{ year: number; owner: string; netWorth: number }> = [];
+    Object.entries(retirementYears).forEach(([owner, year]) => {
+      const yearData = chartData.find(d => d.year === year.toString());
+      if (yearData) {
+        milestones.push({
+          year,
+          owner,
+          netWorth: yearData.netWorth,
+        });
+      }
+    });
+    return milestones;
+  }, [retirementYears, chartData]);
 
   return (
     <div className="h-screen flex flex-col">
@@ -177,26 +275,54 @@ export const Projections = () => {
               {/* End of Plan Year */}
               <div className="bg-white rounded-lg p-4 border-2 border-blue-200 shadow-sm mb-4">
                 <h2 className="text-lg font-bold text-gray-900 mb-3">Plan Settings</h2>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    End of Plan Year
-                  </label>
-                  <input
-                    type="number"
-                    min={currentYear}
-                    max={currentYear + 100}
-                    value={endOfPlanYear}
-                                    onChange={(e) => {
-                      const year = parseInt(e.target.value);
-                      if (!isNaN(year) && year >= currentYear) {
-                        setEndOfPlanYear(year);
-                      }
-                    }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Plan spans {endOfPlanYear - currentYear} years ({currentYear} - {endOfPlanYear})
-                  </p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      End of Plan Year
+                    </label>
+                    <input
+                      type="number"
+                      min={currentYear}
+                      max={currentYear + 100}
+                      value={endOfPlanYear}
+                      onChange={(e) => {
+                        const year = parseInt(e.target.value);
+                        if (!isNaN(year) && year >= currentYear) {
+                          setEndOfPlanYear(year);
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Plan spans {endOfPlanYear - currentYear} years ({currentYear} - {endOfPlanYear})
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Inflation Rate (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="0.1"
+                      value={inflationRate * 100}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value);
+                        if (!isNaN(value) && value >= 0 && value <= 10) {
+                          setInflationRate(value / 100);
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Annual inflation rate: {(inflationRate * 100).toFixed(1)}%
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Adjusts projection to show real purchasing power
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -216,6 +342,47 @@ export const Projections = () => {
                       {accounts.length}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Retirement Planning */}
+              <div className="bg-white rounded-lg p-4 border-2 border-blue-200 shadow-sm mb-4">
+                <h2 className="text-lg font-bold text-gray-900 mb-3">Retirement Planning</h2>
+                <div className="space-y-3">
+                  {allOwners.length === 0 ? (
+                    <p className="text-xs text-gray-500">No owners found. Add accounts to see retirement inputs.</p>
+                  ) : (
+                    allOwners.map((owner) => (
+                      <div key={owner}>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          {owner} Retirement Year
+                        </label>
+                        <input
+                          type="number"
+                          min={currentYear}
+                          max={endOfPlanYear}
+                          value={retirementYears[owner] || ''}
+                          onChange={(e) => {
+                            const year = e.target.value === '' ? undefined : parseInt(e.target.value);
+                            setRetirementYears(prev => {
+                              if (year === undefined) {
+                                const { [owner]: _, ...rest } = prev;
+                                return rest;
+                              }
+                              return { ...prev, [owner]: year };
+                            });
+                          }}
+                          placeholder="Enter retirement year"
+                          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        {retirementYears[owner] && (
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            Retires in {retirementYears[owner]} ({retirementYears[owner] - currentYear} years from now)
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -240,6 +407,13 @@ export const Projections = () => {
                             {inputs.annualInvestmentGrowth !== undefined && (
                               <div>• Growth: {(inputs.annualInvestmentGrowth * 100).toFixed(1)}%/year</div>
                             )}
+                            {inputs.contributeUntilYear !== undefined && (
+                              <div>• Contribute until: {
+                                inputs.contributeUntilYear === 'retirement' 
+                                  ? `Retirement (${getRetirementYearForOwner(account.owner || 'All / Joint') || 'not set'})`
+                                  : inputs.contributeUntilYear
+                              }</div>
+                            )}
                           </div>
                         );
                       })}
@@ -257,6 +431,7 @@ export const Projections = () => {
             <NetWorthProjectionChart 
               chartData={chartData}
               currentNetWorth={currentNetWorth}
+              retirementMilestones={retirementMilestones}
             />
                           </div>
                         </div>
@@ -391,6 +566,44 @@ export const Projections = () => {
                                         {accountInputs.annualInvestmentGrowth !== undefined && (
                                           <p className="text-xs text-blue-600 mt-1 font-medium">
                                             Current: {(accountInputs.annualInvestmentGrowth * 100).toFixed(1)}% annually
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Contribute Until
+                                        </label>
+                                        <select
+                                          value={accountInputs.contributeUntilYear !== undefined ? accountInputs.contributeUntilYear : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (value === '') {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', undefined);
+                                            } else if (value === 'retirement') {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', 'retirement');
+                                            } else {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', parseInt(value));
+                                            }
+                                          }}
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        >
+                                          <option value="">Forever (no end)</option>
+                                          {getContributeUntilYearOptions(account).map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Stop contributing after this year
+                                        </p>
+                                        {accountInputs.contributeUntilYear !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            {accountInputs.contributeUntilYear === 'retirement' 
+                                              ? `Will stop at retirement (${getRetirementYearForOwner(account.owner || 'All / Joint') || 'not set'})`
+                                              : `Will stop contributing in ${accountInputs.contributeUntilYear}`
+                                            }
                                           </p>
                                         )}
                                       </div>

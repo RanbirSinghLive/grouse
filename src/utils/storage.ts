@@ -103,3 +103,65 @@ export const loadBudgetNote = (): string | null => {
   }
 };
 
+// Projection inputs storage functions
+const PROJECTION_INPUTS_STORAGE_KEY = 'grouse-projection-inputs';
+
+export type ProjectionInputs = {
+  [accountId: string]: {
+    annualContribution?: number;
+    annualInvestmentGrowth?: number;
+    contributeUntilYear?: number | 'retirement'; // Year to stop contributions, or 'retirement'
+    [key: string]: any;
+  };
+};
+
+export type RetirementYears = {
+  [ownerName: string]: number; // Retirement year for each owner
+};
+
+const RETIREMENT_YEARS_STORAGE_KEY = 'grouse-retirement-years';
+
+export const saveRetirementYears = (retirementYears: RetirementYears): void => {
+  try {
+    localStorage.setItem(RETIREMENT_YEARS_STORAGE_KEY, JSON.stringify(retirementYears));
+  } catch (error) {
+    console.error('[storage] saveRetirementYears: error saving retirement years', error);
+    throw new Error('Failed to save retirement years to localStorage');
+  }
+};
+
+export const loadRetirementYears = (): RetirementYears | null => {
+  try {
+    const stored = localStorage.getItem(RETIREMENT_YEARS_STORAGE_KEY);
+    if (!stored) {
+      return null;
+    }
+    return JSON.parse(stored) as RetirementYears;
+  } catch (error) {
+    console.error('[storage] loadRetirementYears: error loading retirement years', error);
+    return null;
+  }
+};
+
+export const saveProjectionInputs = (inputs: ProjectionInputs): void => {
+  try {
+    localStorage.setItem(PROJECTION_INPUTS_STORAGE_KEY, JSON.stringify(inputs));
+  } catch (error) {
+    console.error('[storage] saveProjectionInputs: error saving projection inputs', error);
+    throw new Error('Failed to save projection inputs to localStorage');
+  }
+};
+
+export const loadProjectionInputs = (): ProjectionInputs | null => {
+  try {
+    const stored = localStorage.getItem(PROJECTION_INPUTS_STORAGE_KEY);
+    if (!stored) {
+      return null;
+    }
+    return JSON.parse(stored) as ProjectionInputs;
+  } catch (error) {
+    console.error('[storage] loadProjectionInputs: error loading projection inputs', error);
+    return null;
+  }
+};
+

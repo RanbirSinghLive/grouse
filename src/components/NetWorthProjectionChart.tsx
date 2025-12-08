@@ -1,16 +1,24 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 
 interface ChartDataPoint {
   year: string;
+  netWorth: number;
+  retirementOwner?: string;
+}
+
+interface RetirementMilestone {
+  year: number;
+  owner: string;
   netWorth: number;
 }
 
 interface NetWorthProjectionChartProps {
   chartData: ChartDataPoint[];
   currentNetWorth: number;
+  retirementMilestones?: RetirementMilestone[];
 }
 
-export const NetWorthProjectionChart = ({ chartData, currentNetWorth }: NetWorthProjectionChartProps) => {
+export const NetWorthProjectionChart = ({ chartData, currentNetWorth, retirementMilestones = [] }: NetWorthProjectionChartProps) => {
   
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-CA', {
@@ -29,12 +37,26 @@ export const NetWorthProjectionChart = ({ chartData, currentNetWorth }: NetWorth
     return formatCurrency(value);
   };
 
-  const CustomTooltip = ({ active, payload }: any) => {
+  const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
+      const dataPoint = payload[0].payload as ChartDataPoint;
+      const hasRetirement = dataPoint.retirementOwner;
+      
       return (
         <div className="bg-white p-3 border border-gray-300 rounded-lg shadow-lg">
-          <p className="font-semibold text-gray-900">{`Year: ${payload[0].payload.year}`}</p>
+          <p className="font-semibold text-gray-900">{`Year: ${label}`}</p>
           <p className="text-blue-600">{`Net Worth: ${formatCurrency(payload[0].value)}`}</p>
+          {hasRetirement && (
+            <div className="mt-2 pt-2 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎉</span>
+                <div>
+                  <p className="font-semibold text-orange-600 text-sm">{dataPoint.retirementOwner} Retirement</p>
+                  <p className="text-xs text-gray-500">Retirement milestone reached</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -75,6 +97,30 @@ export const NetWorthProjectionChart = ({ chartData, currentNetWorth }: NetWorth
               dot={false}
               name="Net Worth"
             />
+            {/* Retirement milestone markers */}
+            {retirementMilestones.map((milestone) => {
+              const yearStr = milestone.year.toString();
+              const dataPoint = chartData.find(d => d.year === yearStr);
+              if (!dataPoint) return null;
+              
+              return (
+                <ReferenceLine
+                  key={`retirement-${milestone.owner}-${milestone.year}`}
+                  x={yearStr}
+                  stroke="#f97316"
+                  strokeWidth={2}
+                  strokeDasharray="3 3"
+                  label={{
+                    value: `🎉 ${milestone.owner}`,
+                    position: "top",
+                    fill: "#f97316",
+                    fontSize: 11,
+                    fontWeight: "bold",
+                    offset: 5,
+                  }}
+                />
+              );
+            })}
           </LineChart>
         </ResponsiveContainer>
       </div>
