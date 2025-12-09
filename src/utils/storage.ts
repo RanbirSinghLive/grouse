@@ -111,6 +111,12 @@ export type ProjectionInputs = {
     annualContribution?: number;
     annualInvestmentGrowth?: number;
     contributeUntilYear?: number | 'retirement'; // Year to stop contributions, or 'retirement'
+    // DCPP-specific fields
+    dcppEmployerMatchPercentage?: number; // Employer match percentage as decimal (e.g., 0.50 for 50% match)
+    // RESP-specific fields
+    respContributionRoomUsed?: number; // Amount of contribution room already used (default: 2500)
+    respHandoffYear?: number; // Year to hand off RESP to child (account goes to 0)
+    respChildBirthYear?: number; // Child's birth year (for calculating age in handoff year)
     // Mortgage-specific fields
     mortgagePrincipal?: number;
     mortgageInterestRate?: number; // Annual rate as decimal (e.g., 0.05 for 5%)

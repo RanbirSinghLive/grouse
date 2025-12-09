@@ -488,6 +488,7 @@ export const Projections = () => {
       year: number;
       accounts: { [accountId: string]: { balance: number; inflows: Array<{ source: string; amount: number }>; outflows: Array<{ source: string; amount: number }> } };
       taxResults?: Record<string, TaxCalculationResult>; // Store tax results by owner for tooltip
+      respGrantRooms?: { [accountId: string]: { cesgRemaining: number; quebecRemaining: number } }; // RESP grant room tracking
     }> = [];
     
     // Initialize current year account balances
@@ -517,6 +518,15 @@ export const Projections = () => {
       retirementOwner: undefined,
     });
     
+    // Track RESP contribution room used across years (persists across loop iterations)
+    const respContributionRoomUsed: { [accountId: string]: number } = {};
+    (accounts || []).forEach(account => {
+      if (account.type === 'resp') {
+        const inputs = projectionInputs[account.id];
+        respContributionRoomUsed[account.id] = inputs?.respContributionRoomUsed || 2500;
+      }
+    });
+    
     // Project forward year by year
     // Limit to reasonable range to prevent blocking (max 100 years)
     const maxProjectionYears = Math.min(endOfPlanYear, currentYear + 100);
@@ -533,6 +543,27 @@ export const Projections = () => {
         };
       });
       
+      // Track RESP grant rooms (initialize from previous year or defaults)
+      const respGrantRooms: { [accountId: string]: { cesgRemaining: number; quebecRemaining: number } } = {};
+      
+      if (year === currentYear + 1) {
+        // Initialize from first projection year
+        (accounts || []).forEach(account => {
+          if (account.type === 'resp') {
+            respGrantRooms[account.id] = {
+              cesgRemaining: 7200, // $7,200 lifetime max
+              quebecRemaining: 3600, // $3,600 lifetime max
+            };
+          }
+        });
+      } else {
+        // Get from previous year
+        const prevYearData = accountBalancesByYear[accountBalancesByYear.length - 1];
+        if (prevYearData?.respGrantRooms) {
+          Object.assign(respGrantRooms, prevYearData.respGrantRooms);
+        }
+      }
+
       // Apply projection model calculations for each account
       (accounts || []).forEach(account => {
         const inputs = projectionInputs[account.id];
@@ -540,27 +571,96 @@ export const Projections = () => {
         
         // Process asset accounts with inputs
         if (account.kind === 'asset' && inputs) {
-          // Check if contributions should continue this year
-          const contributeUntilYear = getContributeUntilYear(account);
-          const shouldContribute = contributeUntilYear === null || year <= contributeUntilYear;
-          
-          // Step 1: Add annual contribution (if specified and not past contribute-until year)
-          if (shouldContribute && inputs.annualContribution !== undefined && inputs.annualContribution > 0) {
-            const employeeContribution = inputs.annualContribution;
-            balance += employeeContribution;
-            yearAccountFlows[account.id].inflows.push({
-              source: 'Employee Contribution',
-              amount: employeeContribution
-            });
+          // RESP-specific handling
+          if (account.type === 'resp') {
+            // Check if handoff year - if so, set balance to 0
+            if (inputs.respHandoffYear !== undefined && year === inputs.respHandoffYear) {
+              const handoffAmount = balance;
+              balance = 0;
+              if (handoffAmount > 0) {
+                yearAccountFlows[account.id].outflows.push({
+                  source: 'Handoff to Child',
+                  amount: handoffAmount
+                });
+              }
+            } else if (inputs.respHandoffYear === undefined || year < inputs.respHandoffYear) {
+              // Only process contributions if not yet handed off
+              // Track contribution room used (from tracked value that persists across years)
+              const contributionRoomUsed = respContributionRoomUsed[account.id] || (inputs.respContributionRoomUsed || 2500);
+              const contributionRoomRemaining = 50000 - contributionRoomUsed;
+              
+              // Calculate how much we can contribute this year
+              const desiredContribution = inputs.annualContribution || 0;
+              let actualContribution = 0;
+              
+              if (desiredContribution > 0 && contributionRoomRemaining > 0) {
+                // Contribute up to remaining room
+                actualContribution = Math.min(desiredContribution, contributionRoomRemaining);
+                balance += actualContribution;
+                
+                yearAccountFlows[account.id].inflows.push({
+                  source: 'Contribution',
+                  amount: actualContribution
+                });
+                
+                // Update contribution room used for next year (persists across loop iterations)
+                respContributionRoomUsed[account.id] = contributionRoomUsed + actualContribution;
+                
+                // Calculate CESG (20% match, max $500/year, $7,200 lifetime)
+                const cesgRoom = respGrantRooms[account.id]?.cesgRemaining || 7200;
+                const cesgThisYear = Math.min(actualContribution * 0.20, 500, cesgRoom);
+                if (cesgThisYear > 0) {
+                  balance += cesgThisYear;
+                  yearAccountFlows[account.id].inflows.push({
+                    source: 'CESG Grant (20% match)',
+                    amount: cesgThisYear
+                  });
+                  respGrantRooms[account.id] = {
+                    cesgRemaining: cesgRoom - cesgThisYear,
+                    quebecRemaining: respGrantRooms[account.id]?.quebecRemaining || 3600,
+                  };
+                }
+                
+                // Calculate Quebec QESI (10% match, max $250/year, $3,600 lifetime)
+                const quebecRoom = respGrantRooms[account.id]?.quebecRemaining || 3600;
+                const quebecThisYear = Math.min(actualContribution * 0.10, 250, quebecRoom);
+                if (quebecThisYear > 0) {
+                  balance += quebecThisYear;
+                  yearAccountFlows[account.id].inflows.push({
+                    source: 'Quebec QESI Grant (10% match)',
+                    amount: quebecThisYear
+                  });
+                  respGrantRooms[account.id] = {
+                    cesgRemaining: respGrantRooms[account.id]?.cesgRemaining || 7200,
+                    quebecRemaining: quebecRoom - quebecThisYear,
+                  };
+                }
+              }
+            }
+          } else {
+            // Non-RESP accounts (RRSP, TFSA, DCPP, etc.)
+            // Check if contributions should continue this year
+            const contributeUntilYear = getContributeUntilYear(account);
+            const shouldContribute = contributeUntilYear === null || year <= contributeUntilYear;
             
-            // For DCPP accounts, add employer match if specified
-            if (account.type === 'dcpp' && inputs.dcppEmployerMatchPercentage !== undefined && inputs.dcppEmployerMatchPercentage > 0) {
-              const employerMatch = employeeContribution * inputs.dcppEmployerMatchPercentage;
-              balance += employerMatch;
+            // Step 1: Add annual contribution (if specified and not past contribute-until year)
+            if (shouldContribute && inputs.annualContribution !== undefined && inputs.annualContribution > 0) {
+              const employeeContribution = inputs.annualContribution;
+              balance += employeeContribution;
               yearAccountFlows[account.id].inflows.push({
-                source: `Employer Match (${(inputs.dcppEmployerMatchPercentage * 100).toFixed(0)}%)`,
-                amount: employerMatch
+                source: 'Employee Contribution',
+                amount: employeeContribution
               });
+              
+              // For DCPP accounts, add employer match if specified
+              if (account.type === 'dcpp' && inputs.dcppEmployerMatchPercentage !== undefined && inputs.dcppEmployerMatchPercentage > 0) {
+                const employerMatch = employeeContribution * inputs.dcppEmployerMatchPercentage;
+                balance += employerMatch;
+                yearAccountFlows[account.id].inflows.push({
+                  source: `Employer Match (${(inputs.dcppEmployerMatchPercentage * 100).toFixed(0)}%)`,
+                  amount: employerMatch
+                });
+              }
             }
           }
           
@@ -1102,11 +1202,12 @@ export const Projections = () => {
         };
       }
       
-      // Store account flows for this year (including tax)
+      // Store account flows for this year (including tax and RESP grant rooms)
       accountBalancesByYear.push({
         year,
         accounts: yearAccountFlows,
-        taxResults: taxResultsByOwner // Store tax results for tooltip display
+        taxResults: taxResultsByOwner, // Store tax results for tooltip display
+        respGrantRooms: respGrantRooms // Store RESP grant rooms for tooltip display
       });
       
       data.push({
@@ -1407,6 +1508,18 @@ export const Projections = () => {
                             )}
                             {account.type === 'dcpp' && inputs.dcppEmployerMatchPercentage !== undefined && inputs.dcppEmployerMatchPercentage > 0 && inputs.annualContribution !== undefined && (
                               <div>• Employer Match: ${(inputs.annualContribution * inputs.dcppEmployerMatchPercentage).toLocaleString('en-CA')}/year ({(inputs.dcppEmployerMatchPercentage * 100).toFixed(0)}%)</div>
+                            )}
+                            {account.type === 'resp' && inputs.annualContribution !== undefined && inputs.annualContribution > 0 && (
+                              <>
+                                <div>• CESG Grant: ${Math.min(inputs.annualContribution * 0.20, 500).toLocaleString('en-CA')}/year (20% match, max $500/year)</div>
+                                <div>• Quebec QESI: ${Math.min(inputs.annualContribution * 0.10, 250).toLocaleString('en-CA')}/year (10% match, max $250/year)</div>
+                                {inputs.respContributionRoomUsed !== undefined && (
+                                  <div>• Contribution Room Used: ${inputs.respContributionRoomUsed.toLocaleString('en-CA')} / $50,000</div>
+                                )}
+                                {inputs.respHandoffYear !== undefined && (
+                                  <div>• Handoff Year: {inputs.respHandoffYear} {inputs.respChildBirthYear ? `(child age ${inputs.respHandoffYear - inputs.respChildBirthYear})` : ''}</div>
+                                )}
+                              </>
                             )}
                             {inputs.annualInvestmentGrowth !== undefined && (
                               <div>• Growth: {(inputs.annualInvestmentGrowth * 100).toFixed(1)}%/year</div>
@@ -1841,6 +1954,17 @@ export const Projections = () => {
                                   
                                   {inflows.length === 0 && outflows.length === 0 && (
                                     <div className="text-gray-500 italic">No transactions this year</div>
+                                  )}
+                                  
+                                  {/* RESP Grant Room Info */}
+                                  {account.type === 'resp' && yearData.respGrantRooms?.[account.id] && (
+                                    <div className="mt-2 pt-2 border-t border-gray-200">
+                                      <div className="font-medium text-gray-700 mb-1">Grant Room Remaining:</div>
+                                      <div className="text-xs text-gray-600 space-y-0.5">
+                                        <div>CESG: ${yearData.respGrantRooms[account.id].cesgRemaining.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} / $7,200</div>
+                                        <div>Quebec QESI: ${yearData.respGrantRooms[account.id].quebecRemaining.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} / $3,600</div>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -2286,6 +2410,158 @@ export const Projections = () => {
                                                 ? `Will stop contributing in ${year} (age ${age})`
                                                 : `Will stop contributing in ${year}`;
                                             })()}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* RESP-specific inputs */}
+                                  {account.type === 'resp' && (
+                                    <div className="space-y-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Annual Contribution ($)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="100"
+                                          value={accountInputs.annualContribution || ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value);
+                                            updateProjectionInput(account.id, 'annualContribution', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Annual dollar amount you contribute to this RESP
+                                        </p>
+                                        {accountInputs.annualContribution !== undefined && accountInputs.annualContribution > 0 && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            CESG: ${Math.min(accountInputs.annualContribution * 0.20, 500).toLocaleString('en-CA')}/year (20% match, max $500/year)
+                                            <br />
+                                            Quebec QESI: ${Math.min(accountInputs.annualContribution * 0.10, 250).toLocaleString('en-CA')}/year (10% match, max $250/year)
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Contribution Room Already Used ($)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="50000"
+                                          step="100"
+                                          value={accountInputs.respContributionRoomUsed !== undefined ? accountInputs.respContributionRoomUsed : 2500}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? 2500 : parseFloat(e.target.value);
+                                            updateProjectionInput(account.id, 'respContributionRoomUsed', value);
+                                          }}
+                                          placeholder="2500"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Amount of $50,000 lifetime limit already used (default: $2,500)
+                                        </p>
+                                        {accountInputs.respContributionRoomUsed !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            Remaining room: ${(50000 - accountInputs.respContributionRoomUsed).toLocaleString('en-CA')}
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Child Birth Year
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="1900"
+                                          max={currentYear}
+                                          step="1"
+                                          value={accountInputs.respChildBirthYear !== undefined ? accountInputs.respChildBirthYear : 2025}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? 2025 : parseInt(e.target.value);
+                                            updateProjectionInput(account.id, 'respChildBirthYear', value);
+                                          }}
+                                          placeholder="2025"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Child's birth year (used to calculate age in handoff year)
+                                        </p>
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Handoff to Child
+                                        </label>
+                                        <select
+                                          value={accountInputs.respHandoffYear !== undefined ? accountInputs.respHandoffYear : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseInt(e.target.value);
+                                            updateProjectionInput(account.id, 'respHandoffYear', value);
+                                          }}
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        >
+                                          <option value="">Never (keep in projection)</option>
+                                          {(() => {
+                                            const birthYear = accountInputs.respChildBirthYear || 2025;
+                                            const options = [];
+                                            for (let year = currentYear; year <= currentYear + 35; year++) {
+                                              const age = year - birthYear;
+                                              if (age >= 0 && age <= 35) {
+                                                options.push(
+                                                  <option key={year} value={year}>
+                                                    {year} - Age {age}
+                                                  </option>
+                                                );
+                                              }
+                                            }
+                                            return options;
+                                          })()}
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Year to hand off RESP to child (account balance goes to $0)
+                                        </p>
+                                        {accountInputs.respHandoffYear !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            {(() => {
+                                              const birthYear = accountInputs.respChildBirthYear || 2025;
+                                              const age = accountInputs.respHandoffYear - birthYear;
+                                              return `Account will be handed off in ${accountInputs.respHandoffYear} (child age ${age})`;
+                                            })()}
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Annual Investment Growth (%)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          value={accountInputs.annualInvestmentGrowth !== undefined ? accountInputs.annualInvestmentGrowth * 100 : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value) / 100;
+                                            updateProjectionInput(account.id, 'annualInvestmentGrowth', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Expected annual return (e.g., 6 for 6%)
+                                        </p>
+                                        {accountInputs.annualInvestmentGrowth !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            Current: {(accountInputs.annualInvestmentGrowth * 100).toFixed(1)}% annually
                                           </p>
                                         )}
                                       </div>
