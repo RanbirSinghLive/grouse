@@ -4,6 +4,10 @@ import { calcNetWorth, formatAccountType } from '../utils/calculations';
 import { NetWorthProjectionChart } from '../components/NetWorthProjectionChart';
 import { loadProjectionInputs, saveProjectionInputs, loadRetirementYears, saveRetirementYears, loadOwnerAges, saveOwnerAges, loadProjectionSettings, saveProjectionSettings, loadIncomes, saveIncomes, loadExpenses, saveExpenses, type ProjectionInputs, type RetirementYears, type OwnerAges, type Incomes, type Income, type Expenses, type Expense } from '../utils/storage';
 import type { Account } from '../types/models';
+import { calculateTaxByOwner, type TaxableIncomeSources, type TaxCalculationResult } from '../utils/projectionTax';
+
+// Virtual account ID for tax tracking
+const TAX_ACCOUNT_ID = '__TAX__';
 
 export const Projections = () => {
   const {
@@ -483,6 +487,7 @@ export const Projections = () => {
     const accountBalancesByYear: Array<{
       year: number;
       accounts: { [accountId: string]: { balance: number; inflows: Array<{ source: string; amount: number }>; outflows: Array<{ source: string; amount: number }> } };
+      taxResults?: Record<string, TaxCalculationResult>; // Store tax results by owner for tooltip
     }> = [];
     
     // Initialize current year account balances
@@ -494,6 +499,12 @@ export const Projections = () => {
         outflows: []
       };
     });
+    // Initialize tax account for current year (no tax in current year, just structure)
+    currentYearAccountData[TAX_ACCOUNT_ID] = {
+      balance: 0,
+      inflows: [],
+      outflows: []
+    };
     accountBalancesByYear.push({
       year: currentYear,
       accounts: currentYearAccountData
@@ -535,11 +546,22 @@ export const Projections = () => {
           
           // Step 1: Add annual contribution (if specified and not past contribute-until year)
           if (shouldContribute && inputs.annualContribution !== undefined && inputs.annualContribution > 0) {
-            balance += inputs.annualContribution;
+            const employeeContribution = inputs.annualContribution;
+            balance += employeeContribution;
             yearAccountFlows[account.id].inflows.push({
-              source: 'Contribution',
-              amount: inputs.annualContribution
+              source: 'Employee Contribution',
+              amount: employeeContribution
             });
+            
+            // For DCPP accounts, add employer match if specified
+            if (account.type === 'dcpp' && inputs.dcppEmployerMatchPercentage !== undefined && inputs.dcppEmployerMatchPercentage > 0) {
+              const employerMatch = employeeContribution * inputs.dcppEmployerMatchPercentage;
+              balance += employerMatch;
+              yearAccountFlows[account.id].inflows.push({
+                source: `Employer Match (${(inputs.dcppEmployerMatchPercentage * 100).toFixed(0)}%)`,
+                amount: employerMatch
+              });
+            }
           }
           
           // Step 2: Apply investment growth to the total (beginning balance + contributions)
@@ -621,20 +643,43 @@ export const Projections = () => {
         }
       });
       
-      // Subtract expenses from cash accounts (prefer chequing, then cash, or first asset account)
+      // Subtract expenses from accounts (prefer cash accounts, then other liquid assets)
       if (totalExpensesThisYear > 0) {
-        const cashAccount = (accounts || []).find(a => 
-          a.kind === 'asset' && (a.type === 'chequing' || a.type === 'cash')
-        ) || (accounts || []).find(a => a.kind === 'asset');
+        let remainingExpenses = totalExpensesThisYear;
         
-        if (cashAccount) {
-          accountBalances[cashAccount.id] = Math.max(0, (accountBalances[cashAccount.id] || cashAccount.balance) - totalExpensesThisYear);
+        // Priority order: chequing -> cash -> other asset accounts
+        const accountPriority = [
+          ...(accounts || []).filter(a => a.kind === 'asset' && a.type === 'chequing'),
+          ...(accounts || []).filter(a => a.kind === 'asset' && a.type === 'cash'),
+          ...(accounts || []).filter(a => a.kind === 'asset' && !['chequing', 'cash'].includes(a.type))
+        ];
+        
+        for (const account of accountPriority) {
+          if (remainingExpenses <= 0) break;
           
-          // Track expense outflows
-          yearAccountFlows[cashAccount.id].outflows.push({
-            source: 'Expenses',
-            amount: totalExpensesThisYear
-          });
+          const currentBalance = accountBalances[account.id] !== undefined 
+            ? accountBalances[account.id] 
+            : account.balance;
+          
+          if (currentBalance > 0) {
+            const amountToDeduct = Math.min(remainingExpenses, currentBalance);
+            accountBalances[account.id] = currentBalance - amountToDeduct;
+            remainingExpenses -= amountToDeduct;
+            
+            // Track expense outflows
+            yearAccountFlows[account.id].outflows.push({
+              source: 'Expenses',
+              amount: amountToDeduct
+            });
+          }
+        }
+        
+        // If expenses still remain after depleting all assets, log a warning
+        if (remainingExpenses > 0) {
+          console.warn(`[Projections] ⚠️ Expenses exceed available assets! Unpaid expenses: $${remainingExpenses.toLocaleString('en-CA')} in year ${year}. This will reduce net worth.`);
+          
+          // Reduce net worth by creating a negative balance (or track as debt)
+          // For now, we'll let it reduce net worth by not having enough assets
         }
       }
 
@@ -802,6 +847,175 @@ export const Projections = () => {
         }
       });
       
+      // Track taxable income sources by owner for tax calculation
+      const taxableIncomeSourcesByOwner: Record<string, TaxableIncomeSources> = {};
+      
+      // Helper function to get owner or split joint accounts
+      const getOwnerForTax = (owner: string | undefined): string[] => {
+        if (!owner || owner === 'All / Joint') {
+          // Split 50/50 if exactly 2 owners exist, otherwise attribute to first owner
+          if (allOwners.length === 2) {
+            return allOwners;
+          } else if (allOwners.length > 0) {
+            return [allOwners[0]];
+          }
+          return ['All / Joint'];
+        }
+        return [owner];
+      };
+      
+      // Helper function to initialize income sources for an owner
+      const initIncomeSources = (owner: string): TaxableIncomeSources => {
+        if (!taxableIncomeSourcesByOwner[owner]) {
+          taxableIncomeSourcesByOwner[owner] = {
+            employmentIncome: 0,
+            rentalIncome: 0,
+            rrspWithdrawals: 0,
+            capitalGains: 0,
+            eligibleDividends: 0,
+            nonEligibleDividends: 0,
+            foreignDividends: 0,
+            interestIncome: 0,
+          };
+        }
+        return taxableIncomeSourcesByOwner[owner];
+      };
+      
+      // Helper function to add income to owner(s)
+      const addIncomeToOwner = (amount: number, owner: string | undefined, incomeType: keyof TaxableIncomeSources) => {
+        const owners = getOwnerForTax(owner);
+        const splitAmount = amount / owners.length;
+        owners.forEach(ownerName => {
+          const sources = initIncomeSources(ownerName);
+          sources[incomeType] += splitAmount;
+        });
+      };
+      
+      // 1. Track employment income (from incomes array)
+      Object.values(incomes || {}).forEach(income => {
+        const startYear = resolveIncomeStartYear(income);
+        const endYear = resolveIncomeEndYear(income);
+        const isActive = startYear !== null && 
+                        year >= startYear && 
+                        (endYear === null || year <= endYear);
+        
+        if (isActive && income.annualAmount > 0) {
+          const yearsSinceStart = startYear ? year - startYear : 0;
+          let incomeAmount = income.annualAmount;
+          if (income.growthRate && income.growthRate > 0) {
+            incomeAmount = income.annualAmount * Math.pow(1 + income.growthRate, yearsSinceStart);
+          }
+          addIncomeToOwner(incomeAmount, income.owner, 'employmentIncome');
+        }
+      });
+      
+      // 2. Track rental income (from rental_property accounts)
+      (accounts || []).forEach(account => {
+        if (account.kind === 'asset' && account.type === 'rental_property') {
+          // For now, assume rental income is tracked separately or we need to add it
+          // This would need rental income tracking in projection inputs
+          // For now, skip - can be added later
+        }
+      });
+      
+      // 3. Track RRSP withdrawals (when RRSP balance decreases)
+      (accounts || []).forEach(account => {
+        if (account.kind === 'asset' && account.type === 'rrsp') {
+          const inputs = projectionInputs[account.id];
+          const balanceAtStart = yearAccountFlows[account.id]?.balance || account.balance;
+          
+          // Calculate expected balance: start + contributions + growth
+          let expectedBalance = balanceAtStart;
+          
+          // Add contributions if applicable
+          const contributeUntilYear = getContributeUntilYear(account);
+          const shouldContribute = contributeUntilYear === null || year <= contributeUntilYear;
+          if (shouldContribute && inputs?.annualContribution !== undefined && inputs.annualContribution > 0) {
+            expectedBalance += inputs.annualContribution;
+          }
+          
+          // Apply growth
+          if (inputs?.annualInvestmentGrowth !== undefined && inputs.annualInvestmentGrowth > 0) {
+            expectedBalance = expectedBalance * (1 + inputs.annualInvestmentGrowth);
+          }
+          
+          // Compare expected vs actual balance
+          const actualBalance = accountBalances[account.id] !== undefined 
+            ? accountBalances[account.id] 
+            : account.balance;
+          
+          // If actual balance is less than expected, there's a withdrawal
+          if (actualBalance < expectedBalance - 0.01) { // Small tolerance for rounding
+            const withdrawalAmount = expectedBalance - actualBalance;
+            addIncomeToOwner(withdrawalAmount, account.owner, 'rrspWithdrawals');
+            
+            // Also track as outflow in the account flows
+            if (yearAccountFlows[account.id]) {
+              yearAccountFlows[account.id].outflows.push({
+                source: 'RRSP Withdrawal',
+                amount: withdrawalAmount
+              });
+            }
+          }
+        }
+      });
+      
+      // 4. Track capital gains and dividends from non-registered accounts
+      (accounts || []).forEach(account => {
+        if (account.kind === 'asset' && account.type === 'non_registered') {
+          const inputs = projectionInputs[account.id];
+          if (inputs && inputs.annualInvestmentGrowth) {
+            const balanceAtStart = yearAccountFlows[account.id]?.balance || account.balance;
+            const growthAmount = balanceAtStart * inputs.annualInvestmentGrowth;
+            
+            // Assume 70% is capital gains, 30% is dividends (can be refined)
+            const capitalGains = growthAmount * 0.7;
+            const dividends = growthAmount * 0.3;
+            
+            // For simplicity, assume all dividends are eligible Canadian dividends
+            addIncomeToOwner(capitalGains, account.owner, 'capitalGains');
+            addIncomeToOwner(dividends, account.owner, 'eligibleDividends');
+          }
+        }
+      });
+      
+      // 5. Track interest income from cash/savings accounts
+      (accounts || []).forEach(account => {
+        if (account.kind === 'asset' && (account.type === 'cash' || account.type === 'chequing')) {
+          const balanceAtStart = yearAccountFlows[account.id]?.balance || account.balance;
+          if (account.interestRate && account.interestRate > 0) {
+            const interestIncome = balanceAtStart * account.interestRate;
+            addIncomeToOwner(interestIncome, account.owner, 'interestIncome');
+          }
+        }
+      });
+      
+      // Calculate tax for each owner
+      const taxResultsByOwner = calculateTaxByOwner(taxableIncomeSourcesByOwner, 'QC');
+      
+      // Sum total household tax
+      let totalHouseholdTax = 0;
+      Object.values(taxResultsByOwner).forEach(result => {
+        totalHouseholdTax += result.totalTax;
+      });
+      
+      // Store tax as a virtual account in yearAccountFlows
+      const taxInflows: Array<{ source: string; amount: number }> = [];
+      Object.entries(taxResultsByOwner).forEach(([owner, result]) => {
+        if (result.totalTax > 0) {
+          taxInflows.push({
+            source: `Tax - ${owner}`,
+            amount: result.totalTax
+          });
+        }
+      });
+      
+      yearAccountFlows[TAX_ACCOUNT_ID] = {
+        balance: totalHouseholdTax,
+        inflows: taxInflows,
+        outflows: []
+      };
+      
       // Calculate projected net worth from updated balances
       const projectedAssets = (accounts || [])
         .filter(a => a.kind === 'asset')
@@ -879,10 +1093,20 @@ export const Projections = () => {
           : account.balance;
       });
       
-      // Store account flows for this year
+      // Ensure tax account is in yearAccountFlows (in case no tax was calculated)
+      if (!yearAccountFlows[TAX_ACCOUNT_ID]) {
+        yearAccountFlows[TAX_ACCOUNT_ID] = {
+          balance: totalHouseholdTax,
+          inflows: taxInflows,
+          outflows: []
+        };
+      }
+      
+      // Store account flows for this year (including tax)
       accountBalancesByYear.push({
         year,
-        accounts: yearAccountFlows
+        accounts: yearAccountFlows,
+        taxResults: taxResultsByOwner // Store tax results for tooltip display
       });
       
       data.push({
@@ -1181,6 +1405,9 @@ export const Projections = () => {
                             {inputs.annualContribution !== undefined && (
                               <div>• Contribution: ${inputs.annualContribution.toLocaleString('en-CA')}/year</div>
                             )}
+                            {account.type === 'dcpp' && inputs.dcppEmployerMatchPercentage !== undefined && inputs.dcppEmployerMatchPercentage > 0 && inputs.annualContribution !== undefined && (
+                              <div>• Employer Match: ${(inputs.annualContribution * inputs.dcppEmployerMatchPercentage).toLocaleString('en-CA')}/year ({(inputs.dcppEmployerMatchPercentage * 100).toFixed(0)}%)</div>
+                            )}
                             {inputs.annualInvestmentGrowth !== undefined && (
                               <div>• Growth: {(inputs.annualInvestmentGrowth * 100).toFixed(1)}%/year</div>
                             )}
@@ -1288,6 +1515,145 @@ export const Projections = () => {
                   )}
                 </div>
               </div>
+
+              {/* Tax Strategy Panel */}
+              <div className="bg-white rounded-lg p-4 border-2 border-purple-200 shadow-sm mb-4">
+                <h2 className="text-lg font-bold text-gray-900 mb-3">Tax Strategy (Quebec/Canada)</h2>
+                <div className="space-y-3 text-xs">
+                  {(() => {
+                    // Calculate tax for current year (2025)
+                    const currentYearTaxSources: Record<string, TaxableIncomeSources> = {};
+                    
+                    // Helper to initialize income sources
+                    const initSources = (owner: string): TaxableIncomeSources => {
+                      if (!currentYearTaxSources[owner]) {
+                        currentYearTaxSources[owner] = {
+                          employmentIncome: 0,
+                          rentalIncome: 0,
+                          rrspWithdrawals: 0,
+                          capitalGains: 0,
+                          eligibleDividends: 0,
+                          nonEligibleDividends: 0,
+                          foreignDividends: 0,
+                          interestIncome: 0,
+                        };
+                      }
+                      return currentYearTaxSources[owner];
+                    };
+                    
+                    // Helper to get owner(s) for tax
+                    const getOwnerForTax = (owner: string | undefined): string[] => {
+                      if (!owner || owner === 'All / Joint') {
+                        if (allOwners.length === 2) {
+                          return allOwners;
+                        } else if (allOwners.length > 0) {
+                          return [allOwners[0]];
+                        }
+                        return ['All / Joint'];
+                      }
+                      return [owner];
+                    };
+                    
+                    // Track employment income
+                    Object.values(incomes || {}).forEach(income => {
+                      const startYear = resolveIncomeStartYear(income);
+                      const endYear = resolveIncomeEndYear(income);
+                      const isActive = startYear !== null && 
+                                      currentYear >= startYear && 
+                                      (endYear === null || currentYear <= endYear);
+                      
+                      if (isActive && income.annualAmount > 0) {
+                        const owners = getOwnerForTax(income.owner);
+                        const splitAmount = income.annualAmount / owners.length;
+                        owners.forEach(ownerName => {
+                          initSources(ownerName).employmentIncome += splitAmount;
+                        });
+                      }
+                    });
+                    
+                    // Track interest income
+                    (accounts || []).forEach(account => {
+                      if (account.kind === 'asset' && (account.type === 'cash' || account.type === 'chequing')) {
+                        if (account.interestRate && account.interestRate > 0) {
+                          const interestIncome = account.balance * account.interestRate;
+                          const owners = getOwnerForTax(account.owner);
+                          const splitAmount = interestIncome / owners.length;
+                          owners.forEach(ownerName => {
+                            initSources(ownerName).interestIncome += splitAmount;
+                          });
+                        }
+                      }
+                    });
+                    
+                    // Track capital gains and dividends from non-registered accounts
+                    (accounts || []).forEach(account => {
+                      if (account.kind === 'asset' && account.type === 'non_registered') {
+                        const inputs = projectionInputs[account.id];
+                        if (inputs && inputs.annualInvestmentGrowth) {
+                          const growthAmount = account.balance * inputs.annualInvestmentGrowth;
+                          const capitalGains = growthAmount * 0.7;
+                          const dividends = growthAmount * 0.3;
+                          const owners = getOwnerForTax(account.owner);
+                          const splitCapitalGains = capitalGains / owners.length;
+                          const splitDividends = dividends / owners.length;
+                          owners.forEach(ownerName => {
+                            initSources(ownerName).capitalGains += splitCapitalGains;
+                            initSources(ownerName).eligibleDividends += splitDividends;
+                          });
+                        }
+                      }
+                    });
+                    
+                    // Calculate tax for each owner
+                    const currentYearTaxResults = calculateTaxByOwner(currentYearTaxSources, 'QC');
+                    const totalHouseholdTax = Object.values(currentYearTaxResults).reduce((sum, result) => sum + result.totalTax, 0);
+                    const totalHouseholdIncome = Object.values(currentYearTaxResults).reduce((sum, result) => sum + result.totalTaxableIncome, 0);
+                    const avgEffectiveRate = totalHouseholdIncome > 0 ? (totalHouseholdTax / totalHouseholdIncome) * 100 : 0;
+                    
+                    return (
+                      <div className="space-y-3">
+                        <div className="text-gray-600">
+                          <div className="font-medium mb-2">Current Year ({currentYear}) Projection</div>
+                        </div>
+                        
+                        {/* Breakdown by Owner */}
+                        {Object.entries(currentYearTaxResults).map(([owner, result]) => {
+                          if (result.totalTaxableIncome === 0) return null;
+                          return (
+                            <div key={owner} className="border border-gray-200 rounded-lg p-2 bg-gray-50">
+                              <div className="font-medium text-gray-800 mb-1">{owner}</div>
+                              <div className="text-gray-600 space-y-0.5">
+                                <div>Taxable Income: ${result.totalTaxableIncome.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                                <div>Estimated Tax: ${result.totalTax.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                                <div>Effective Marginal Rate: {(result.effectiveMarginalRate * 100).toFixed(1)}%</div>
+                                <div>Average Rate: {(result.averageRate * 100).toFixed(1)}%</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        
+                        {/* Household Total */}
+                        {totalHouseholdTax > 0 && (
+                          <div className="border-2 border-purple-300 rounded-lg p-2 bg-purple-50">
+                            <div className="font-semibold text-gray-900 mb-1">Household Total</div>
+                            <div className="text-gray-700 space-y-0.5">
+                              <div>Combined Taxable Income: ${totalHouseholdIncome.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                              <div>Combined Tax: ${totalHouseholdTax.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                              <div>Average Effective Rate: {avgEffectiveRate.toFixed(1)}%</div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {totalHouseholdTax === 0 && (
+                          <div className="text-gray-500 italic">
+                            No taxable income projected for {currentYear}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
                         </div>
           )}
                           </div>
@@ -1334,6 +1700,7 @@ export const Projections = () => {
                 <thead className="sticky top-0 bg-gray-100 z-10">
                   <tr>
                     <th className="border border-gray-300 px-2 py-1 text-left font-semibold bg-gray-100 sticky left-0 z-20">Year</th>
+                    <th className="border border-gray-300 px-2 py-1 text-left font-semibold bg-gray-100 min-w-24 sticky left-12 z-20">Tax</th>
                     {(accounts || []).map(account => (
                       <th key={account.id} className="border border-gray-300 px-2 py-1 text-left font-semibold bg-gray-100 min-w-24">
                         {account.name}
@@ -1348,6 +1715,77 @@ export const Projections = () => {
                       <tr key={year} className="hover:bg-gray-50">
                         <td className="border border-gray-300 px-2 py-1 font-medium bg-gray-50 sticky left-0 z-10">
                           {year}
+                        </td>
+                        {/* Tax Column */}
+                        <td className="border border-gray-300 px-2 py-1 text-right relative group cursor-help text-red-700 sticky left-12 z-10 bg-gray-50">
+                          {(() => {
+                            const taxData = yearData.accounts[TAX_ACCOUNT_ID];
+                            const taxAmount = taxData?.balance ?? 0;
+                            return (
+                              <>
+                                <span>${taxAmount.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                                
+                                {/* Hover Tooltip */}
+                                {taxAmount > 0 && yearData.taxResults && (
+                                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 w-96 bg-white border-2 border-gray-300 rounded-lg shadow-xl p-3 z-50 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity">
+                                    <div className="font-semibold text-gray-900 mb-2">Tax - {year}</div>
+                                    <div className="text-xs">
+                                      <div className="mb-2">
+                                        <div className="font-medium text-gray-700 mb-1">Total Household Tax:</div>
+                                        <div className="text-red-700 font-semibold">
+                                          ${taxAmount.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </div>
+                                      </div>
+                                      
+                                      {/* Breakdown by Owner */}
+                                      {Object.entries(yearData.taxResults).map(([owner, result]) => {
+                                        if (result.totalTax === 0) return null;
+                                        return (
+                                          <div key={owner} className="mb-3 pb-2 border-b border-gray-200 last:border-0">
+                                            <div className="font-medium text-gray-800 mb-1">{owner}</div>
+                                            <div className="text-gray-600 space-y-0.5">
+                                              <div>Tax: ${result.totalTax.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                              <div className="text-xs text-gray-500 mt-1">Income Sources:</div>
+                                              {result.incomeSources.employmentIncome > 0 && (
+                                                <div className="text-green-600 pl-2 text-xs">
+                                                  Employment: ${result.incomeSources.employmentIncome.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → Tax: ${result.breakdown.employmentTax.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </div>
+                                              )}
+                                              {result.incomeSources.rentalIncome > 0 && (
+                                                <div className="text-green-600 pl-2 text-xs">
+                                                  Rental: ${result.incomeSources.rentalIncome.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → Tax: ${result.breakdown.rentalTax.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </div>
+                                              )}
+                                              {result.incomeSources.rrspWithdrawals > 0 && (
+                                                <div className="text-green-600 pl-2 text-xs">
+                                                  RRSP Withdrawals: ${result.incomeSources.rrspWithdrawals.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → Tax: ${result.breakdown.rrspTax.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </div>
+                                              )}
+                                              {result.incomeSources.capitalGains > 0 && (
+                                                <div className="text-green-600 pl-2 text-xs">
+                                                  Capital Gains: ${result.incomeSources.capitalGains.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → Tax: ${result.breakdown.capitalGainsTax.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </div>
+                                              )}
+                                              {(result.incomeSources.eligibleDividends > 0 || result.incomeSources.nonEligibleDividends > 0 || result.incomeSources.foreignDividends > 0) && (
+                                                <div className="text-green-600 pl-2 text-xs">
+                                                  Dividends: ${(result.incomeSources.eligibleDividends + result.incomeSources.nonEligibleDividends + result.incomeSources.foreignDividends).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → Tax: ${result.breakdown.dividendTax.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </div>
+                                              )}
+                                              {result.incomeSources.interestIncome > 0 && (
+                                                <div className="text-green-600 pl-2 text-xs">
+                                                  Interest: ${result.incomeSources.interestIncome.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → Tax: ${result.breakdown.interestTax.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                         </td>
                         {(accounts || []).map(account => {
                           const accountData = yearData.accounts[account.id];
@@ -1643,6 +2081,136 @@ export const Projections = () => {
                                         <p className="text-xs text-gray-500 mt-0.5">
                                           Annual dollar amount contributed to this TFSA
                                         </p>
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Annual Investment Growth (%)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          value={accountInputs.annualInvestmentGrowth !== undefined ? accountInputs.annualInvestmentGrowth * 100 : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value) / 100;
+                                            updateProjectionInput(account.id, 'annualInvestmentGrowth', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Expected annual return (e.g., 6 for 6%)
+                                        </p>
+                                        {accountInputs.annualInvestmentGrowth !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            Current: {(accountInputs.annualInvestmentGrowth * 100).toFixed(1)}% annually
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Contribute Until
+                                        </label>
+                                        <select
+                                          value={accountInputs.contributeUntilYear !== undefined ? accountInputs.contributeUntilYear : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (value === '') {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', undefined);
+                                            } else if (value === 'retirement') {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', 'retirement');
+                                            } else {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', parseInt(value));
+                                            }
+                                          }}
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        >
+                                          <option value="">Forever (no end)</option>
+                                          {getContributeUntilYearOptions(account).map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Stop contributing after this year
+                                        </p>
+                                        {accountInputs.contributeUntilYear !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            {(() => {
+                                              const owner = account.owner || 'All / Joint';
+                                              if (accountInputs.contributeUntilYear === 'retirement') {
+                                                const retYear = getRetirementYearForOwner(owner);
+                                                if (!retYear) return 'Will stop at retirement (not set)';
+                                                const retAge = getAgeInYear(owner, retYear);
+                                                return retAge !== null
+                                                  ? `Will stop at retirement (${retYear} - ${retAge})`
+                                                  : `Will stop at retirement (${retYear})`;
+                                              }
+                                              const year = accountInputs.contributeUntilYear as number;
+                                              const age = getAgeInYear(owner, year);
+                                              return age !== null
+                                                ? `Will stop contributing in ${year} (age ${age})`
+                                                : `Will stop contributing in ${year}`;
+                                            })()}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* DCPP-specific inputs */}
+                                  {account.type === 'dcpp' && (
+                                    <div className="space-y-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Annual Employee Contribution ($)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="100"
+                                          value={accountInputs.annualContribution || ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value);
+                                            updateProjectionInput(account.id, 'annualContribution', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Annual dollar amount you contribute to this DCPP
+                                        </p>
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Employer Match (%)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="200"
+                                          step="1"
+                                          value={accountInputs.dcppEmployerMatchPercentage !== undefined ? accountInputs.dcppEmployerMatchPercentage * 100 : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value) / 100;
+                                            updateProjectionInput(account.id, 'dcppEmployerMatchPercentage', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Employer match percentage (e.g., 50 for 50% match, 100 for dollar-for-dollar)
+                                        </p>
+                                        {accountInputs.dcppEmployerMatchPercentage !== undefined && accountInputs.annualContribution !== undefined && accountInputs.annualContribution > 0 && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            Employer will contribute: ${(accountInputs.annualContribution * accountInputs.dcppEmployerMatchPercentage).toLocaleString('en-CA')}/year
+                                          </p>
+                                        )}
                                       </div>
 
                                       <div>
