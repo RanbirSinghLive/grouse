@@ -4,6 +4,7 @@ interface ChartDataPoint {
   year: string;
   netWorth: number;
   retirementOwner?: string;
+  mortgageFreeAccounts?: string;
 }
 
 interface RetirementMilestone {
@@ -12,13 +13,26 @@ interface RetirementMilestone {
   netWorth: number;
 }
 
-interface NetWorthProjectionChartProps {
+interface MortgageMilestone {
+  year: number;
+  accountName: string;
+  netWorth: number;
+}
+
+export interface NetWorthProjectionChartProps {
   chartData: ChartDataPoint[];
   currentNetWorth: number;
   retirementMilestones?: RetirementMilestone[];
+  mortgageMilestones?: MortgageMilestone[];
 }
 
-export const NetWorthProjectionChart = ({ chartData, currentNetWorth, retirementMilestones = [] }: NetWorthProjectionChartProps) => {
+export const NetWorthProjectionChart = ({ chartData, currentNetWorth, retirementMilestones = [], mortgageMilestones = [] }: NetWorthProjectionChartProps) => {
+  
+  console.log('[NetWorthProjectionChart] Rendering with milestones:', {
+    retirementMilestones: retirementMilestones.length,
+    mortgageMilestones: mortgageMilestones.length,
+    mortgageMilestonesData: mortgageMilestones
+  });
   
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-CA', {
@@ -41,6 +55,7 @@ export const NetWorthProjectionChart = ({ chartData, currentNetWorth, retirement
     if (active && payload && payload.length) {
       const dataPoint = payload[0].payload as ChartDataPoint;
       const hasRetirement = dataPoint.retirementOwner;
+      const hasMortgageFree = dataPoint.mortgageFreeAccounts;
       
       return (
         <div className="bg-white p-3 border border-gray-300 rounded-lg shadow-lg">
@@ -53,6 +68,17 @@ export const NetWorthProjectionChart = ({ chartData, currentNetWorth, retirement
                 <div>
                   <p className="font-semibold text-orange-600 text-sm">{dataPoint.retirementOwner} Retirement</p>
                   <p className="text-xs text-gray-500">Retirement milestone reached</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {hasMortgageFree && (
+            <div className="mt-2 pt-2 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🏠</span>
+                <div>
+                  <p className="font-semibold text-green-600 text-sm">Mortgage Free!</p>
+                  <p className="text-xs text-gray-500">{dataPoint.mortgageFreeAccounts}</p>
                 </div>
               </div>
             </div>
@@ -114,6 +140,30 @@ export const NetWorthProjectionChart = ({ chartData, currentNetWorth, retirement
                     value: `🎉 ${milestone.owner}`,
                     position: "top",
                     fill: "#f97316",
+                    fontSize: 11,
+                    fontWeight: "bold",
+                    offset: 5,
+                  }}
+                />
+              );
+            })}
+            {/* Mortgage-free milestone markers */}
+            {mortgageMilestones.map((milestone) => {
+              const yearStr = milestone.year.toString();
+              const dataPoint = chartData.find(d => d.year === yearStr);
+              if (!dataPoint) return null;
+              
+              return (
+                <ReferenceLine
+                  key={`mortgage-${milestone.accountName}-${milestone.year}`}
+                  x={yearStr}
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  strokeDasharray="3 3"
+                  label={{
+                    value: `🏠 ${milestone.accountName}`,
+                    position: "bottom",
+                    fill: "#10b981",
                     fontSize: 11,
                     fontWeight: "bold",
                     offset: 5,
