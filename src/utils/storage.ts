@@ -117,6 +117,11 @@ export type ProjectionInputs = {
     respContributionRoomUsed?: number; // Amount of contribution room already used (default: 2500)
     respHandoffYear?: number; // Year to hand off RESP to child (account goes to 0)
     respChildBirthYear?: number; // Child's birth year (for calculating age in handoff year)
+    // Non-registered account-specific fields
+    nonRegCapitalGainsRate?: number; // Annual capital gains rate as decimal (e.g., 0.05 for 5%)
+    nonRegDividendYield?: number; // Annual dividend yield as decimal (e.g., 0.03 for 3%)
+    nonRegDividendType?: 'canadian_eligible' | 'canadian_non_eligible' | 'foreign' | 'none'; // Type of dividends
+    nonRegInterestRate?: number; // Annual interest rate as decimal (e.g., 0.02 for 2%)
     // Mortgage-specific fields
     mortgagePrincipal?: number;
     mortgageInterestRate?: number; // Annual rate as decimal (e.g., 0.05 for 5%)

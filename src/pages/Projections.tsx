@@ -664,8 +664,58 @@ export const Projections = () => {
             }
           }
           
-          // Step 2: Apply investment growth to the total (beginning balance + contributions)
-          if (inputs.annualInvestmentGrowth !== undefined && inputs.annualInvestmentGrowth > 0) {
+          // Step 2: Apply investment returns to the total (beginning balance + contributions)
+          // For non-registered accounts, use separate rates for capital gains, dividends, and interest
+          if (account.type === 'non_registered') {
+            // Calculate all returns on the balance BEFORE applying returns (for accurate tax tracking)
+            const balanceBeforeReturns = balance;
+            let totalReturn = 0;
+            
+            // Capital gains (investment growth)
+            if (inputs.nonRegCapitalGainsRate !== undefined && inputs.nonRegCapitalGainsRate > 0) {
+              const capitalGains = balanceBeforeReturns * inputs.nonRegCapitalGainsRate;
+              balance += capitalGains;
+              totalReturn += capitalGains;
+              if (capitalGains > 0) {
+                yearAccountFlows[account.id].inflows.push({
+                  source: `Capital Gains (${(inputs.nonRegCapitalGainsRate * 100).toFixed(1)}%)`,
+                  amount: capitalGains
+                });
+              }
+            }
+            
+            // Dividends (calculated on starting balance)
+            if (inputs.nonRegDividendYield !== undefined && inputs.nonRegDividendYield > 0) {
+              const dividends = balanceBeforeReturns * inputs.nonRegDividendYield;
+              balance += dividends;
+              totalReturn += dividends;
+              if (dividends > 0) {
+                const dividendType = inputs.nonRegDividendType || 'canadian_eligible';
+                const typeLabel = dividendType === 'canadian_eligible' ? 'Canadian Eligible' 
+                  : dividendType === 'canadian_non_eligible' ? 'Canadian Non-Eligible'
+                  : dividendType === 'foreign' ? 'Foreign'
+                  : 'Dividends';
+                yearAccountFlows[account.id].inflows.push({
+                  source: `${typeLabel} Dividends (${(inputs.nonRegDividendYield * 100).toFixed(1)}%)`,
+                  amount: dividends
+                });
+              }
+            }
+            
+            // Interest (calculated on starting balance)
+            if (inputs.nonRegInterestRate !== undefined && inputs.nonRegInterestRate > 0) {
+              const interest = balanceBeforeReturns * inputs.nonRegInterestRate;
+              balance += interest;
+              totalReturn += interest;
+              if (interest > 0) {
+                yearAccountFlows[account.id].inflows.push({
+                  source: `Interest (${(inputs.nonRegInterestRate * 100).toFixed(1)}%)`,
+                  amount: interest
+                });
+              }
+            }
+          } else if (inputs.annualInvestmentGrowth !== undefined && inputs.annualInvestmentGrowth > 0) {
+            // For other accounts (RRSP, TFSA, etc.), use single growth rate
             const growthAmount = balance * inputs.annualInvestmentGrowth;
             balance = balance * (1 + inputs.annualInvestmentGrowth);
             if (growthAmount > 0) {
@@ -1060,21 +1110,99 @@ export const Projections = () => {
         }
       });
       
-      // 4. Track capital gains and dividends from non-registered accounts
+      // 4. Track withdrawals from non-registered accounts (only tax when withdrawn, not when earned)
+      // Note: Returns (capital gains, dividends, interest) accumulate tax-free until withdrawn
+      // This matches Canadian tax law where capital gains are only taxed when realized
       (accounts || []).forEach(account => {
         if (account.kind === 'asset' && account.type === 'non_registered') {
           const inputs = projectionInputs[account.id];
-          if (inputs && inputs.annualInvestmentGrowth) {
-            const balanceAtStart = yearAccountFlows[account.id]?.balance || account.balance;
-            const growthAmount = balanceAtStart * inputs.annualInvestmentGrowth;
+          const balanceAtStart = yearAccountFlows[account.id]?.balance || account.balance;
+          
+          // Calculate expected balance: start + contributions + all returns
+          let expectedBalance = balanceAtStart;
+          
+          // Add contributions if applicable
+          const contributeUntilYear = getContributeUntilYear(account);
+          const shouldContribute = contributeUntilYear === null || year <= contributeUntilYear;
+          if (shouldContribute && inputs?.annualContribution !== undefined && inputs.annualContribution > 0) {
+            expectedBalance += inputs.annualContribution;
+          }
+          
+          // Apply all returns (capital gains, dividends, interest) - these accumulate but are NOT taxed yet
+          if (inputs?.nonRegCapitalGainsRate !== undefined && inputs.nonRegCapitalGainsRate > 0) {
+            expectedBalance = expectedBalance * (1 + inputs.nonRegCapitalGainsRate);
+          }
+          if (inputs?.nonRegDividendYield !== undefined && inputs.nonRegDividendYield > 0) {
+            expectedBalance += expectedBalance * inputs.nonRegDividendYield;
+          }
+          if (inputs?.nonRegInterestRate !== undefined && inputs.nonRegInterestRate > 0) {
+            expectedBalance += expectedBalance * inputs.nonRegInterestRate;
+          }
+          
+          // Compare expected vs actual balance to detect withdrawals
+          // Actual balance may be reduced by expenses or explicit withdrawals
+          const actualBalance = accountBalances[account.id] !== undefined 
+            ? accountBalances[account.id] 
+            : account.balance;
+          
+          // If actual balance is less than expected, there's a withdrawal (or expense paid from account)
+          if (actualBalance < expectedBalance - 0.01) { // Small tolerance for rounding
+            const withdrawalAmount = expectedBalance - actualBalance;
             
-            // Assume 70% is capital gains, 30% is dividends (can be refined)
-            const capitalGains = growthAmount * 0.7;
-            const dividends = growthAmount * 0.3;
+            // Calculate the proportion of withdrawal that represents returns vs principal
+            // This uses a simplified approach: assume withdrawal is proportional to returns/principal ratio
+            // More sophisticated approach would track cost basis separately
+            const contributionThisYear = (shouldContribute && inputs?.annualContribution) ? inputs.annualContribution : 0;
+            const totalReturns = expectedBalance - balanceAtStart - contributionThisYear;
+            const totalValue = expectedBalance;
+            const returnsProportion = totalValue > 0 ? Math.max(0, Math.min(1, totalReturns / totalValue)) : 0;
             
-            // For simplicity, assume all dividends are eligible Canadian dividends
-            addIncomeToOwner(capitalGains, account.owner, 'capitalGains');
-            addIncomeToOwner(dividends, account.owner, 'eligibleDividends');
+            // Taxable portion of withdrawal (returns portion only, principal is not taxable)
+            const taxableWithdrawal = withdrawalAmount * returnsProportion;
+            
+            // Calculate what portion of returns is capital gains vs dividends vs interest
+            // This allocation determines how the taxable withdrawal is taxed
+            let totalReturnRate = 0;
+            if (inputs?.nonRegCapitalGainsRate) totalReturnRate += inputs.nonRegCapitalGainsRate;
+            if (inputs?.nonRegDividendYield) totalReturnRate += inputs.nonRegDividendYield;
+            if (inputs?.nonRegInterestRate) totalReturnRate += inputs.nonRegInterestRate;
+            
+            if (totalReturnRate > 0 && taxableWithdrawal > 0) {
+              // Allocate taxable withdrawal proportionally to return types
+              if (inputs?.nonRegCapitalGainsRate) {
+                const capitalGainsPortion = (inputs.nonRegCapitalGainsRate / totalReturnRate) * taxableWithdrawal;
+                addIncomeToOwner(capitalGainsPortion, account.owner, 'capitalGains');
+              }
+              
+              if (inputs?.nonRegDividendYield) {
+                const dividendPortion = (inputs.nonRegDividendYield / totalReturnRate) * taxableWithdrawal;
+                const dividendType = inputs.nonRegDividendType || 'canadian_eligible';
+                if (dividendType === 'canadian_eligible') {
+                  addIncomeToOwner(dividendPortion, account.owner, 'eligibleDividends');
+                } else if (dividendType === 'canadian_non_eligible') {
+                  addIncomeToOwner(dividendPortion, account.owner, 'nonEligibleDividends');
+                } else if (dividendType === 'foreign') {
+                  addIncomeToOwner(dividendPortion, account.owner, 'foreignDividends');
+                }
+              }
+              
+              if (inputs?.nonRegInterestRate) {
+                const interestPortion = (inputs.nonRegInterestRate / totalReturnRate) * taxableWithdrawal;
+                addIncomeToOwner(interestPortion, account.owner, 'interestIncome');
+              }
+            }
+            
+            // Track withdrawal as outflow (may be from expenses or explicit withdrawal)
+            if (yearAccountFlows[account.id]) {
+              // Check if this withdrawal was already tracked as an expense
+              const existingWithdrawal = yearAccountFlows[account.id].outflows.find(f => f.source === 'Expenses');
+              if (!existingWithdrawal) {
+                yearAccountFlows[account.id].outflows.push({
+                  source: 'Withdrawal',
+                  amount: withdrawalAmount
+                });
+              }
+            }
           }
         }
       });
@@ -1521,7 +1649,20 @@ export const Projections = () => {
                                 )}
                               </>
                             )}
-                            {inputs.annualInvestmentGrowth !== undefined && (
+                            {account.type === 'non_registered' && (
+                              <>
+                                {inputs.nonRegCapitalGainsRate !== undefined && (
+                                  <div>• Capital Gains: {(inputs.nonRegCapitalGainsRate * 100).toFixed(1)}%/year (50% taxable)</div>
+                                )}
+                                {inputs.nonRegDividendYield !== undefined && inputs.nonRegDividendYield > 0 && (
+                                  <div>• Dividend Yield: {(inputs.nonRegDividendYield * 100).toFixed(1)}%/year ({inputs.nonRegDividendType || 'canadian_eligible'})</div>
+                                )}
+                                {inputs.nonRegInterestRate !== undefined && inputs.nonRegInterestRate > 0 && (
+                                  <div>• Interest Rate: {(inputs.nonRegInterestRate * 100).toFixed(1)}%/year (fully taxable)</div>
+                                )}
+                              </>
+                            )}
+                            {account.type !== 'non_registered' && inputs.annualInvestmentGrowth !== undefined && (
                               <div>• Growth: {(inputs.annualInvestmentGrowth * 100).toFixed(1)}%/year</div>
                             )}
                             {inputs.contributeUntilYear !== undefined && (
@@ -1698,24 +1839,8 @@ export const Projections = () => {
                       }
                     });
                     
-                    // Track capital gains and dividends from non-registered accounts
-                    (accounts || []).forEach(account => {
-                      if (account.kind === 'asset' && account.type === 'non_registered') {
-                        const inputs = projectionInputs[account.id];
-                        if (inputs && inputs.annualInvestmentGrowth) {
-                          const growthAmount = account.balance * inputs.annualInvestmentGrowth;
-                          const capitalGains = growthAmount * 0.7;
-                          const dividends = growthAmount * 0.3;
-                          const owners = getOwnerForTax(account.owner);
-                          const splitCapitalGains = capitalGains / owners.length;
-                          const splitDividends = dividends / owners.length;
-                          owners.forEach(ownerName => {
-                            initSources(ownerName).capitalGains += splitCapitalGains;
-                            initSources(ownerName).eligibleDividends += splitDividends;
-                          });
-                        }
-                      }
-                    });
+                    // Non-registered accounts: only tax on withdrawals, not on earned returns
+                    // (No tax tracking here - withdrawals are tracked in the projection loop)
                     
                     // Calculate tax for each owner
                     const currentYearTaxResults = calculateTaxByOwner(currentYearTaxSources, 'QC');
@@ -2562,6 +2687,185 @@ export const Projections = () => {
                                         {accountInputs.annualInvestmentGrowth !== undefined && (
                                           <p className="text-xs text-blue-600 mt-1 font-medium">
                                             Current: {(accountInputs.annualInvestmentGrowth * 100).toFixed(1)}% annually
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Non-registered account-specific inputs */}
+                                  {account.type === 'non_registered' && (
+                                    <div className="space-y-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Annual Contribution ($)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="100"
+                                          value={accountInputs.annualContribution || ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value);
+                                            updateProjectionInput(account.id, 'annualContribution', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Optional: Annual dollar amount contributed to this account
+                                        </p>
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Capital Gains Rate (%)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          value={accountInputs.nonRegCapitalGainsRate !== undefined ? accountInputs.nonRegCapitalGainsRate * 100 : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value) / 100;
+                                            updateProjectionInput(account.id, 'nonRegCapitalGainsRate', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Annual capital appreciation rate (taxed at 50% inclusion rate)
+                                        </p>
+                                        {accountInputs.nonRegCapitalGainsRate !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            Current: {(accountInputs.nonRegCapitalGainsRate * 100).toFixed(1)}% annually
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Dividend Yield (%)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          value={accountInputs.nonRegDividendYield !== undefined ? accountInputs.nonRegDividendYield * 100 : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value) / 100;
+                                            updateProjectionInput(account.id, 'nonRegDividendYield', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Annual dividend yield (taxed with gross-up and credits)
+                                        </p>
+                                        {accountInputs.nonRegDividendYield !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            Current: {(accountInputs.nonRegDividendYield * 100).toFixed(1)}% annually
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Dividend Type
+                                        </label>
+                                        <select
+                                          value={accountInputs.nonRegDividendType || 'canadian_eligible'}
+                                          onChange={(e) => {
+                                            const value = e.target.value as 'canadian_eligible' | 'canadian_non_eligible' | 'foreign' | 'none';
+                                            updateProjectionInput(account.id, 'nonRegDividendType', value);
+                                          }}
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        >
+                                          <option value="canadian_eligible">Canadian Eligible (best tax treatment)</option>
+                                          <option value="canadian_non_eligible">Canadian Non-Eligible</option>
+                                          <option value="foreign">Foreign/International</option>
+                                          <option value="none">No Dividends</option>
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Type of dividends affects tax calculation (gross-up and credits)
+                                        </p>
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Interest Rate (%)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="100"
+                                          step="0.1"
+                                          value={accountInputs.nonRegInterestRate !== undefined ? accountInputs.nonRegInterestRate * 100 : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value === '' ? undefined : parseFloat(e.target.value) / 100;
+                                            updateProjectionInput(account.id, 'nonRegInterestRate', value);
+                                          }}
+                                          placeholder="0"
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Annual interest rate (fully taxable as ordinary income)
+                                        </p>
+                                        {accountInputs.nonRegInterestRate !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            Current: {(accountInputs.nonRegInterestRate * 100).toFixed(1)}% annually
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                          Contribute Until
+                                        </label>
+                                        <select
+                                          value={accountInputs.contributeUntilYear !== undefined ? accountInputs.contributeUntilYear : ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (value === '') {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', undefined);
+                                            } else if (value === 'retirement') {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', 'retirement');
+                                            } else {
+                                              updateProjectionInput(account.id, 'contributeUntilYear', parseInt(value));
+                                            }
+                                          }}
+                                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        >
+                                          <option value="">Forever (no end)</option>
+                                          {getContributeUntilYearOptions(account).map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          Stop contributing after this year
+                                        </p>
+                                        {accountInputs.contributeUntilYear !== undefined && (
+                                          <p className="text-xs text-blue-600 mt-1 font-medium">
+                                            {(() => {
+                                              const owner = account.owner || 'All / Joint';
+                                              if (accountInputs.contributeUntilYear === 'retirement') {
+                                                const retYear = getRetirementYearForOwner(owner);
+                                                if (!retYear) return 'Will stop at retirement (not set)';
+                                                const retAge = getAgeInYear(owner, retYear);
+                                                return retAge !== null
+                                                  ? `Will stop at retirement (${retYear} - ${retAge})`
+                                                  : `Will stop at retirement (${retYear})`;
+                                              }
+                                              const year = accountInputs.contributeUntilYear as number;
+                                              const age = getAgeInYear(owner, year);
+                                              return age !== null
+                                                ? `Will stop contributing in ${year} (age ${age})`
+                                                : `Will stop contributing in ${year}`;
+                                            })()}
                                           </p>
                                         )}
                                       </div>
