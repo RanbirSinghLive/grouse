@@ -1,9 +1,9 @@
 # 🧭 Product Requirements Document (PRD)
 
 **Product Name:** Grouse  
-**Version:** 0.1 MVP  
+**Version:** 0.2.2 (Updated: January 2025)  
 **Owner:** Ranbir Singh  
-**Date:** November 2025  
+**Date:** November 2025 (Last Updated: January 2025)  
 
 ---
 
@@ -83,7 +83,7 @@ Each chart auto-updates when the data store changes.
 - `/` → Dashboard (key totals + charts)
 - `/accounts` → Accounts (Assets & Liabilities CRUD)
 - `/budget` → Budget (Transaction analysis, category averages, month-by-month view)
-- `/projections` → Projections (v0.2+) - Financial forecasting and scenario planning
+- `/projections` → Projections - Financial forecasting and scenario planning (FULLY IMPLEMENTED)
 - `/settings` → Settings (household info, export/import, reset)
 
 **Form UX:**
@@ -242,63 +242,154 @@ const calcNetWorth = (accounts: Account[]): number =>
 
 ---
 
-## 7. 🗺️ Future Extensions
+## 7. 📈 Projections Tab (IMPLEMENTED)
+
+The Projections tab is **fully implemented** and enables users to forecast their financial future with comprehensive modeling capabilities.
+
+### 7.1 Core Features (Implemented)
+
+**Net Worth Projection:**
+- Forecast net worth over 1-100 years based on current assets, liabilities, income, and expenses
+- Interactive line chart showing net worth trajectory with milestone markers
+- Year-by-year breakdown table showing account balances, inflows, outflows, and tax
+- Hover tooltips on table cells showing detailed account flows
+- Retirement milestone markers on chart
+- Mortgage payoff milestone markers on chart
+
+**Three-Panel Layout:**
+- **Left Panel:** Settings and configuration (collapsible containers)
+  - Plan Settings: End of plan year, inflation rate
+  - Retirement Planning: Owner ages, retirement years
+  - Projection Model Summary: Overview of all configured inputs
+  - Tax Strategy: Current year tax projections (Quebec/Canada)
+- **Center Panel:** Net worth projection chart and year-by-year account balances table
+- **Right Panel:** Account-specific inputs (collapsible containers)
+  - Accounts grouped by owner
+  - Individual account configuration forms
+
+**Account-Specific Inputs:**
+- **RRSP:** Annual contribution, investment growth rate, contribute-until year
+- **TFSA:** Annual contribution, investment growth rate, contribute-until year
+- **DCPP:** Annual employee contribution, employer match percentage, investment growth rate, contribute-until year
+- **RESP:** Annual contribution, contribution room tracking ($50,000 lifetime max), CESG grant (20% match, $500/year, $7,200 lifetime), Quebec QESI grant (10% match, $250/year, $3,600 lifetime), handoff year, child birth year
+- **Non-Registered:** Annual contribution, capital gains rate, dividend yield (eligible/non-eligible/foreign), interest rate, contribute-until year
+- **Mortgages:** Principal, interest rate, payment amount, payment frequency (monthly/weekly/accelerated biweekly), amortization period
+
+**Income and Expense Management:**
+- Add/edit/delete income sources with:
+  - Annual amount, growth rate, start year, end year, owner attribution
+- Add/edit/delete expense sources with:
+  - Annual amount, growth rate, start year, end year, owner attribution
+- All persisted to localStorage
+
+**Tax Calculations (Quebec/Canada):**
+- Comprehensive tax modeling with owner attribution
+- Tracks multiple income types:
+  - Employment income (reduced by RRSP/DCPP contributions)
+  - Rental income
+  - RRSP withdrawals
+  - Capital gains (50% inclusion rate, only on withdrawals from non-registered accounts)
+  - Eligible dividends (with gross-up and tax credits)
+  - Non-eligible dividends
+  - Foreign dividends
+  - Interest income
+- Tax deductions:
+  - RRSP contributions reduce taxable employment income
+  - DCPP employee contributions reduce taxable employment income
+- Tax column in year-by-year table showing total household tax
+- Hover tooltips showing tax breakdown by owner and income source
+- Tax Strategy panel showing current year projections with effective marginal and average rates
+
+**Cash Flow Modeling:**
+- Contributions to investment accounts (RRSP, TFSA, RESP, DCPP, non-registered) are deducted from cash accounts
+- Income is added to cash accounts
+- Expenses are deducted from cash accounts
+- Proper order: Income → Contributions → Expenses
+
+**Retirement Planning:**
+- Set current age for each owner
+- Set retirement year for each owner
+- Retirement milestones displayed on chart
+- Age calculations for projection years
+
+### 7.2 Technical Implementation
+
+**Data Models:**
+- `ProjectionInputs`: Account-specific configuration (contributions, growth rates, etc.)
+- `Incomes`: Income sources with growth rates and time periods
+- `Expenses`: Expense sources with growth rates and time periods
+- `RetirementYears`: Retirement year by owner
+- `OwnerAges`: Current age by owner
+
+**Calculation Engine:**
+- Year-by-year projection loop (1-100 years)
+- Account balance calculations with:
+  - Contributions (with room limits for RESP)
+  - Investment growth (capital gains, dividends, interest)
+  - Employer matches (DCPP)
+  - Government grants (RESP CESG and QESI)
+  - Mortgage payments (Canadian mortgage calculations with semi-annual compounding)
+  - Withdrawal detection for tax purposes
+- Tax calculations using `canadianTaxRates.ts` with Quebec-specific rates
+- Owner attribution for proper tax burden allocation
+
+**Storage:**
+- All projection inputs, incomes, expenses, retirement years, and owner ages persisted to localStorage
+- Auto-save with debouncing to prevent blocking
+
+**UI Components:**
+- `NetWorthProjectionChart`: Interactive line chart with milestone markers
+- Collapsible containers for better organization
+- Responsive three-panel layout with toggle buttons
+- Hover tooltips for detailed information
+
+### 7.3 Future Enhancements
 
 | Future Feature | Description |
 |----------------|-------------|
-| **Projection Engine** | Deterministic and Monte Carlo projections - See [PROJECTION_TAB_DESIGN.md](./PROJECTION_TAB_DESIGN.md) for detailed design |
-| **Invest vs Prepay Tool** | Compare mortgage prepayment vs investing with side-by-side analysis |
-| **Tax Insights** | Approximate CPP/OAS and RRSP deduction effects |
-| **Cloud Sync** | Optional Supabase/Firebase backend |
+| **Mortgage vs Invest Comparison** | Side-by-side analysis of paying down mortgage vs investing surplus |
+| **Monte Carlo Simulations** | Probabilistic projections with confidence intervals |
 | **Multi-scenario Management** | Save multiple financial plans and compare outcomes |
+| **CPP/OAS Estimates** | Government benefit projections |
+| **Cloud Sync** | Optional Supabase/Firebase backend |
 
-### Projection Tab Overview (v0.2+)
-
-The Projection tab enables users to forecast their financial future. Key features:
-
-**Core Projection Types:**
-1. **Net Worth Projection** - Forecast net worth over 1-30 years based on current assets, liabilities, income, and expenses
-2. **Mortgage vs Invest Comparison** - Side-by-side analysis of paying down mortgage vs investing surplus
-3. **Retirement Projection** - Estimate retirement readiness with CPP/OAS considerations
-4. **Major Purchase Affordability** - Determine if a major purchase is financially feasible
-
-**Key Capabilities:**
-- Configurable assumptions (investment returns, inflation, salary growth)
-- Life events modeling (one-time expenses, income changes)
-- Multiple scenario comparison
-- Year-by-year breakdown tables
-- Interactive charts showing trajectories
-- Canadian-specific features (RRSP deductions, TFSA growth, CPP/OAS)
-
-**Implementation Phases:**
-- **Phase 1 (v0.2):** Basic net worth projection with fixed assumptions
-- **Phase 2 (v0.2.1):** User-configurable assumptions and scenario management
-- **Phase 3 (v0.2.2):** Mortgage vs Invest comparison tool
-- **Phase 4 (v0.2.3):** Life events modeling
-- **Phase 5 (v0.3):** Retirement-specific projections
-- **Phase 6 (v0.4):** Monte Carlo simulations with confidence intervals
-
-See [PROJECTION_TAB_DESIGN.md](./PROJECTION_TAB_DESIGN.md) for complete technical specifications, data models, calculation algorithms, and UI/UX designs.
+See [PROJECTION_TAB_DESIGN.md](./PROJECTION_TAB_DESIGN.md) for detailed technical specifications and design documentation.
 
 ---
 
 ## 8. ✅ Acceptance Criteria
 
-- Users can create/edit/delete assets, liabilities, incomes, expenses.
-- Dashboard shows computed totals for net worth, cashflow, and savings rate.
-- Charts update dynamically on data changes.
-- All data persists across sessions locally.
-- JSON export/import works reliably.
+**Core Features:**
+- ✅ Users can create/edit/delete assets, liabilities, incomes, expenses.
+- ✅ Dashboard shows computed totals for net worth, cashflow, and savings rate.
+- ✅ Charts update dynamically on data changes.
+- ✅ All data persists across sessions locally.
+- ✅ JSON export/import works reliably.
+
+**Projections Tab:**
+- ✅ Users can configure account-specific projection inputs (contributions, growth rates, etc.).
+- ✅ Net worth projection chart displays trajectory over 1-100 years.
+- ✅ Year-by-year account balances table shows detailed flows with hover tooltips.
+- ✅ Tax calculations properly attribute income by owner and apply RRSP/DCPP deductions.
+- ✅ RESP grants (CESG and Quebec QESI) are automatically calculated.
+- ✅ Mortgage payments calculated using Canadian mortgage formulas.
+- ✅ Contributions are properly deducted from cash accounts.
+- ✅ Retirement milestones and mortgage payoff milestones displayed on chart.
+- ✅ All projection settings persist to localStorage.
 
 ---
 
-## 9. 🧭 Roadmap (v0.1 → v0.2)
+## 9. 🧭 Roadmap
 
-| Milestone | Deliverable |
-|-----------|-------------|
-| v0.1 MVP | CRUD + charts + persistence |
-| v0.2 | Scenario comparison + export/import polish |
-| v0.3 | Forecast engine integration |
+| Milestone | Deliverable | Status |
+|-----------|-------------|--------|
+| v0.1 MVP | CRUD + charts + persistence | ✅ Complete |
+| v0.2 | Projections tab with net worth forecasting | ✅ Complete |
+| v0.2.1 | Tax modeling and account-specific inputs | ✅ Complete |
+| v0.2.2 | RESP, DCPP, and non-registered account support | ✅ Complete |
+| v0.3 | Mortgage vs Invest comparison tool | 🔄 Planned |
+| v0.4 | Monte Carlo simulations | 🔄 Planned |
+| v0.5 | Multi-scenario management | 🔄 Planned |
 
 ---
 

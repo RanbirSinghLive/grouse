@@ -541,6 +541,89 @@ export const Projections = () => {
     let pendingRrspContributions: Array<{ amount: number; owner: string | undefined }> = [];
     let pendingDcppContributions: Array<{ amount: number; owner: string | undefined }> = [];
     
+    // Calculate real effective rates (nominal return - inflation) for all investment accounts
+    // This helps determine if inflation is reducing effective returns below thresholds
+    const effectiveRatesAnalysis: Array<{
+      accountName: string;
+      accountType: string;
+      nominalRate: number;
+      inflationRate: number;
+      realRate: number;
+      isBelowThreshold: boolean;
+      threshold: number;
+    }> = [];
+    
+    const thresholdRate = 0.063; // 6.3% threshold
+    
+    (accounts || []).forEach(account => {
+      if (account.kind === 'asset') {
+        const inputs = projectionInputs[account.id];
+        let nominalRate = 0;
+        
+        // Get nominal return rate based on account type
+        if (account.type === 'non_registered' && inputs) {
+          // For non-registered, use the highest of capital gains, dividends, or interest
+          const rates = [
+            inputs.nonRegCapitalGainsRate || 0,
+            inputs.nonRegDividendYield || 0,
+            inputs.nonRegInterestRate || 0
+          ].filter(r => r > 0);
+          nominalRate = rates.length > 0 ? Math.max(...rates) : 0;
+        } else if (inputs?.annualInvestmentGrowth !== undefined) {
+          nominalRate = inputs.annualInvestmentGrowth;
+        }
+        
+        if (nominalRate > 0) {
+          // Calculate real return: (1 + nominal) / (1 + inflation) - 1
+          // This is more accurate than simple subtraction for compounding
+          const realRate = ((1 + nominalRate) / (1 + inflationRate)) - 1;
+          const isBelowThreshold = realRate < thresholdRate;
+          
+          effectiveRatesAnalysis.push({
+            accountName: account.name,
+            accountType: account.type,
+            nominalRate: nominalRate * 100, // Convert to percentage for display
+            inflationRate: inflationRate * 100,
+            realRate: realRate * 100,
+            isBelowThreshold,
+            threshold: thresholdRate * 100
+          });
+        }
+      }
+    });
+    
+    // Log effective rates analysis
+    if (effectiveRatesAnalysis.length > 0) {
+      console.log(`[Projections] Effective Rates Analysis (Real Return = Nominal - Inflation):`, {
+        inflationRate: `${(inflationRate * 100).toFixed(2)}%`,
+        threshold: `${(thresholdRate * 100).toFixed(2)}%`,
+        accounts: effectiveRatesAnalysis.map(analysis => ({
+          account: analysis.accountName,
+          type: analysis.accountType,
+          nominalRate: `${analysis.nominalRate.toFixed(2)}%`,
+          inflationRate: `${analysis.inflationRate.toFixed(2)}%`,
+          realRate: `${analysis.realRate.toFixed(2)}%`,
+          belowThreshold: analysis.isBelowThreshold ? '⚠️ YES' : '✓ NO',
+          formula: `(${analysis.nominalRate.toFixed(2)}% - ${analysis.inflationRate.toFixed(2)}% = ${analysis.realRate.toFixed(2)}%)`
+        })),
+        summary: {
+          accountsBelowThreshold: effectiveRatesAnalysis.filter(a => a.isBelowThreshold).length,
+          totalAccounts: effectiveRatesAnalysis.length,
+          accountsAtRisk: effectiveRatesAnalysis
+            .filter(a => a.isBelowThreshold)
+            .map(a => `${a.accountName} (${a.realRate.toFixed(2)}%)`)
+        }
+      });
+      
+      // Warn if any accounts are below threshold
+      const accountsBelowThreshold = effectiveRatesAnalysis.filter(a => a.isBelowThreshold);
+      if (accountsBelowThreshold.length > 0) {
+        console.warn(`[Projections] ⚠️ WARNING: ${accountsBelowThreshold.length} account(s) have real effective rates below ${(thresholdRate * 100).toFixed(2)}%:`, 
+          accountsBelowThreshold.map(a => `${a.accountName}: ${a.realRate.toFixed(2)}% (nominal: ${a.nominalRate.toFixed(2)}% - inflation: ${a.inflationRate.toFixed(2)}%)`).join(', ')
+        );
+      }
+    }
+    
     for (let year = currentYear + 1; year <= maxProjectionYears; year++) {
       const yearsIntoProjection = year - currentYear;
       
