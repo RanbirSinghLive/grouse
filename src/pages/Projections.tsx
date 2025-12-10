@@ -138,10 +138,16 @@ export const Projections = () => {
   const [expandedIncomes, setExpandedIncomes] = useState<Set<string>>(new Set());
   const [expandedExpenses, setExpandedExpenses] = useState<Set<string>>(new Set());
   
-  // Collapsible sections state
+  // Collapsible sections state (right panel)
   const [accountsSectionExpanded, setAccountsSectionExpanded] = useState(true);
   const [incomesSectionExpanded, setIncomesSectionExpanded] = useState(true);
   const [expensesSectionExpanded, setExpensesSectionExpanded] = useState(true);
+  
+  // Collapsible sections state (left panel)
+  const [planSettingsExpanded, setPlanSettingsExpanded] = useState(true);
+  const [retirementPlanningExpanded, setRetirementPlanningExpanded] = useState(true);
+  const [projectionModelExpanded, setProjectionModelExpanded] = useState(true);
+  const [taxStrategyExpanded, setTaxStrategyExpanded] = useState(true);
 
   // Projection model: account-specific inputs
   const [projectionInputs, setProjectionInputs] = useState<ProjectionInputs>(() => {
@@ -530,8 +536,17 @@ export const Projections = () => {
     // Project forward year by year
     // Limit to reasonable range to prevent blocking (max 100 years)
     const maxProjectionYears = Math.min(endOfPlanYear, currentYear + 100);
+    
+    // Temporary storage for pending RRSP and DCPP contributions (reset each year)
+    let pendingRrspContributions: Array<{ amount: number; owner: string | undefined }> = [];
+    let pendingDcppContributions: Array<{ amount: number; owner: string | undefined }> = [];
+    
     for (let year = currentYear + 1; year <= maxProjectionYears; year++) {
       const yearsIntoProjection = year - currentYear;
+      
+      // Reset pending contributions for this year
+      pendingRrspContributions = [];
+      pendingDcppContributions = [];
       
       // Initialize account flows for this year
       const yearAccountFlows: { [accountId: string]: { balance: number; inflows: Array<{ source: string; amount: number }>; outflows: Array<{ source: string; amount: number }> } } = {};
@@ -652,6 +667,23 @@ export const Projections = () => {
                 amount: employeeContribution
               });
               
+              // Track RRSP contributions by owner (for tax deduction)
+              // Note: We'll attribute these after helper functions are defined
+              if (account.type === 'rrsp') {
+                pendingRrspContributions.push({
+                  amount: employeeContribution,
+                  owner: account.owner
+                });
+              }
+              
+              // Track DCPP employee contributions by owner (for tax deduction)
+              if (account.type === 'dcpp') {
+                pendingDcppContributions.push({
+                  amount: employeeContribution,
+                  owner: account.owner
+                });
+              }
+              
               // For DCPP accounts, add employer match if specified
               if (account.type === 'dcpp' && inputs.dcppEmployerMatchPercentage !== undefined && inputs.dcppEmployerMatchPercentage > 0) {
                 const employerMatch = employeeContribution * inputs.dcppEmployerMatchPercentage;
@@ -768,6 +800,56 @@ export const Projections = () => {
             source: 'Income',
             amount: totalIncomeThisYear
           });
+        }
+      }
+
+      // Track total contributions this year (to deduct from cash)
+      let totalContributionsThisYear = 0;
+      (accounts || []).forEach(account => {
+        if (account.kind === 'asset') {
+          const inputs = projectionInputs[account.id];
+          if (inputs?.annualContribution !== undefined && inputs.annualContribution > 0) {
+            const contributeUntilYear = getContributeUntilYear(account);
+            const shouldContribute = contributeUntilYear === null || year <= contributeUntilYear;
+            
+            if (shouldContribute) {
+              if (account.type === 'resp') {
+                // RESP contributions are handled separately (with room limits)
+                const contributionRoomUsed = respContributionRoomUsed[account.id] || (inputs.respContributionRoomUsed || 2500);
+                const contributionRoomRemaining = 50000 - contributionRoomUsed;
+                const actualContribution = Math.min(inputs.annualContribution, contributionRoomRemaining);
+                totalContributionsThisYear += actualContribution;
+              } else {
+                // RRSP, TFSA, DCPP (employee portion), non-registered
+                totalContributionsThisYear += inputs.annualContribution;
+              }
+            }
+          }
+        }
+      });
+
+      // Deduct contributions from cash accounts (after income, before expenses)
+      if (totalContributionsThisYear > 0) {
+        const cashAccount = (accounts || []).find(a => 
+          a.kind === 'asset' && (a.type === 'chequing' || a.type === 'cash')
+        ) || (accounts || []).find(a => a.kind === 'asset');
+        
+        if (cashAccount) {
+          const cashBefore = accountBalances[cashAccount.id] || cashAccount.balance;
+          const cashAfter = cashBefore - totalContributionsThisYear;
+          accountBalances[cashAccount.id] = Math.max(0, cashAfter);
+          
+          // Track contribution outflows
+          yearAccountFlows[cashAccount.id].outflows.push({
+            source: 'Contributions (RRSP/TFSA/RESP/DCPP/Non-Reg)',
+            amount: totalContributionsThisYear
+          });
+          
+          if (cashAfter < 0) {
+            console.warn(`[Projections] ⚠️ Cash account ${cashAccount.name} went negative after contributions! Cash before: $${cashBefore.toLocaleString('en-CA')}, Contributions: $${totalContributionsThisYear.toLocaleString('en-CA')}, Cash after (capped at 0): $${accountBalances[cashAccount.id].toLocaleString('en-CA')}`);
+          }
+        } else {
+          console.warn(`[Projections] ⚠️ No cash account found to deduct contributions from!`);
         }
       }
 
@@ -1000,6 +1082,11 @@ export const Projections = () => {
       // Track taxable income sources by owner for tax calculation
       const taxableIncomeSourcesByOwner: Record<string, TaxableIncomeSources> = {};
       
+      // Track RRSP and DCPP contributions by owner (to reduce taxable income)
+      // Will be populated after processing accounts
+      const rrspContributionsByOwner: Record<string, number> = {};
+      const dcppContributionsByOwner: Record<string, number> = {};
+
       // Helper function to get owner or split joint accounts
       const getOwnerForTax = (owner: string | undefined): string[] => {
         if (!owner || owner === 'All / Joint') {
@@ -1041,7 +1128,25 @@ export const Projections = () => {
         });
       };
       
+      // Process pending RRSP and DCPP contributions (attribute to owners now that helpers are defined)
+      pendingRrspContributions.forEach(pending => {
+        const owners = getOwnerForTax(pending.owner);
+        owners.forEach(ownerName => {
+          const splitAmount = pending.amount / owners.length;
+          rrspContributionsByOwner[ownerName] = (rrspContributionsByOwner[ownerName] || 0) + splitAmount;
+        });
+      });
+      
+      pendingDcppContributions.forEach(pending => {
+        const owners = getOwnerForTax(pending.owner);
+        owners.forEach(ownerName => {
+          const splitAmount = pending.amount / owners.length;
+          dcppContributionsByOwner[ownerName] = (dcppContributionsByOwner[ownerName] || 0) + splitAmount;
+        });
+      });
+
       // 1. Track employment income (from incomes array)
+      // Note: RRSP and DCPP contributions will be deducted from this income for tax purposes
       Object.values(incomes || {}).forEach(income => {
         const startYear = resolveIncomeStartYear(income);
         const endYear = resolveIncomeEndYear(income);
@@ -1056,6 +1161,22 @@ export const Projections = () => {
             incomeAmount = income.annualAmount * Math.pow(1 + income.growthRate, yearsSinceStart);
           }
           addIncomeToOwner(incomeAmount, income.owner, 'employmentIncome');
+        }
+      });
+      
+      // 1b. Reduce employment income by RRSP and DCPP contributions (tax deductions)
+      // In Canada, RRSP and DCPP employee contributions are tax-deductible
+      Object.keys(taxableIncomeSourcesByOwner).forEach(owner => {
+        const rrspDeduction = rrspContributionsByOwner[owner] || 0;
+        const dcppDeduction = dcppContributionsByOwner[owner] || 0;
+        const totalDeduction = rrspDeduction + dcppDeduction;
+        
+        if (totalDeduction > 0) {
+          const currentEmploymentIncome = taxableIncomeSourcesByOwner[owner].employmentIncome;
+          const reducedEmploymentIncome = Math.max(0, currentEmploymentIncome - totalDeduction);
+          taxableIncomeSourcesByOwner[owner].employmentIncome = reducedEmploymentIncome;
+          
+          console.log(`[Projections] 💰 Tax deduction for ${owner}: Employment income $${currentEmploymentIncome.toLocaleString('en-CA')} - RRSP $${rrspDeduction.toLocaleString('en-CA')} - DCPP $${dcppDeduction.toLocaleString('en-CA')} = $${reducedEmploymentIncome.toLocaleString('en-CA')}`);
         }
       });
       
@@ -1461,9 +1582,24 @@ export const Projections = () => {
           {leftPanelVisible && (
             <div className="flex-1 overflow-y-auto p-4 pt-14">
               {/* End of Plan Year */}
-              <div className="bg-white rounded-lg p-4 border-2 border-blue-200 shadow-sm mb-4">
-                <h2 className="text-lg font-bold text-gray-900 mb-3">Plan Settings</h2>
-                <div className="space-y-4">
+              <div className="bg-white rounded-lg border-2 border-blue-200 shadow-sm mb-4">
+                <div 
+                  className="flex items-center justify-between p-4 cursor-pointer"
+                  onClick={() => setPlanSettingsExpanded(!planSettingsExpanded)}
+                >
+                  <h2 className="text-lg font-bold text-gray-900">Plan Settings</h2>
+                  <svg 
+                    className={`w-5 h-5 text-gray-500 transition-transform ${planSettingsExpanded ? 'rotate-180' : ''}`}
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                
+                {planSettingsExpanded && (
+                  <div className="px-4 pb-4 space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       End of Plan Year
@@ -1515,14 +1651,30 @@ export const Projections = () => {
                       Adjusts projection to show real purchasing power
                     </p>
                   </div>
-                </div>
+                  </div>
+                )}
               </div>
 
 
               {/* Retirement Planning */}
-              <div className="bg-white rounded-lg p-4 border-2 border-blue-200 shadow-sm mb-4">
-                <h2 className="text-lg font-bold text-gray-900 mb-3">Retirement Planning</h2>
-                <div className="space-y-4">
+              <div className="bg-white rounded-lg border-2 border-blue-200 shadow-sm mb-4">
+                <div 
+                  className="flex items-center justify-between p-4 cursor-pointer"
+                  onClick={() => setRetirementPlanningExpanded(!retirementPlanningExpanded)}
+                >
+                  <h2 className="text-lg font-bold text-gray-900">Retirement Planning</h2>
+                  <svg 
+                    className={`w-5 h-5 text-gray-500 transition-transform ${retirementPlanningExpanded ? 'rotate-180' : ''}`}
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                
+                {retirementPlanningExpanded && (
+                  <div className="px-4 pb-4 space-y-4">
                   {allOwners.length === 0 ? (
                     <p className="text-xs text-gray-500">No owners found. Add accounts to see retirement inputs.</p>
                   ) : (
@@ -1613,13 +1765,29 @@ export const Projections = () => {
                       );
                     })
                   )}
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* Projection Model Summary */}
-              <div className="bg-white rounded-lg p-4 border-2 border-blue-200 shadow-sm">
-                <h2 className="text-lg font-bold text-gray-900 mb-3">Projection Model</h2>
-                <div className="space-y-2 text-xs">
+              <div className="bg-white rounded-lg border-2 border-blue-200 shadow-sm mb-4">
+                <div 
+                  className="flex items-center justify-between p-4 cursor-pointer"
+                  onClick={() => setProjectionModelExpanded(!projectionModelExpanded)}
+                >
+                  <h2 className="text-lg font-bold text-gray-900">Projection Model</h2>
+                  <svg 
+                    className={`w-5 h-5 text-gray-500 transition-transform ${projectionModelExpanded ? 'rotate-180' : ''}`}
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                
+                {projectionModelExpanded && (
+                  <div className="px-4 pb-4 space-y-2 text-xs">
                   <div className="text-gray-600">
                     Accounts with inputs: {Object.keys(projectionInputs).length}
                   </div>
@@ -1767,13 +1935,29 @@ export const Projections = () => {
                       </div>
                     </div>
                   )}
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* Tax Strategy Panel */}
-              <div className="bg-white rounded-lg p-4 border-2 border-purple-200 shadow-sm mb-4">
-                <h2 className="text-lg font-bold text-gray-900 mb-3">Tax Strategy (Quebec/Canada)</h2>
-                <div className="space-y-3 text-xs">
+              <div className="bg-white rounded-lg border-2 border-purple-200 shadow-sm mb-4">
+                <div 
+                  className="flex items-center justify-between p-4 cursor-pointer"
+                  onClick={() => setTaxStrategyExpanded(!taxStrategyExpanded)}
+                >
+                  <h2 className="text-lg font-bold text-gray-900">Tax Strategy (Quebec/Canada)</h2>
+                  <svg 
+                    className={`w-5 h-5 text-gray-500 transition-transform ${taxStrategyExpanded ? 'rotate-180' : ''}`}
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                
+                {taxStrategyExpanded && (
+                  <div className="px-4 pb-4 space-y-3 text-xs">
                   {(() => {
                     // Calculate tax for current year (2025)
                     const currentYearTaxSources: Record<string, TaxableIncomeSources> = {};
@@ -1890,9 +2074,10 @@ export const Projections = () => {
                       </div>
                     );
                   })()}
-                </div>
+                  </div>
+                )}
               </div>
-                        </div>
+            </div>
           )}
                           </div>
 
