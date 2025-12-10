@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check Grouse Data</title>
+</head>
+<body>
+    <h1>Grouse Data Checker</h1>
+    <div id="results"></div>
+    <script>
+        const results = document.getElementById('results');
+        
+        function checkStorage() {
+            const keys = ['grouse-app-data', 'grouse-import-data', 'grouse-projection-data', 'grouse-budget-note'];
+            const data = {};
+            
+            keys.forEach(key => {
+                const value = localStorage.getItem(key);
+                if (value) {
+                    try {
+                        data[key] = JSON.parse(value);
+                        results.innerHTML += `<h2>${key}</h2><pre>${JSON.stringify(data[key], null, 2)}</pre>`;
+                    } catch (e) {
+                        results.innerHTML += `<h2>${key}</h2><p>Error parsing: ${e.message}</p><p>Raw: ${value.substring(0, 200)}...</p>`;
+                    }
+                } else {
+                    results.innerHTML += `<h2>${key}</h2><p>No data found</p>`;
+                }
+            });
+            
+            // Create download button for backup
+            const backup = {};
+            keys.forEach(key => {
+                const value = localStorage.getItem(key);
+                if (value) {
+                    backup[key] = JSON.parse(value);
+                }
+            });
+            
+            const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `grouse-backup-${new Date().toISOString().split('T')[0]}.json`;
+            a.textContent = 'Download Backup';
+            a.style.display = 'block';
+            a.style.marginTop = '20px';
+            a.style.padding = '10px';
+            a.style.backgroundColor = '#4CAF50';
+            a.style.color = 'white';
+            a.style.textDecoration = 'none';
+            a.style.borderRadius = '5px';
+            results.appendChild(a);
+        }
+        
+        checkStorage();
+    </script>
+</body>
+</html>
+
